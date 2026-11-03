@@ -1,0 +1,82 @@
+
+    import mongoose, { Schema, Model } from "mongoose";
+
+    export interface IDonation {
+    userId: mongoose.Types.ObjectId;
+    hubId: string;
+    sessionId: string;
+    totalItems: number;
+    acceptedItems: number;
+    rejectedItems: number;
+    gpAwarded: number;
+    status: "PENDING" | "COMPLETED" | "CANCELLED";
+    confirmedAt?: Date;
+    }
+
+    const DonationSchema = new Schema<IDonation>(
+    {
+        userId: {
+        type: Schema.Types.ObjectId,
+        required: true,
+        ref: "User",
+        },
+
+        hubId: {
+        type: String,
+        required: true,
+        },
+
+        sessionId: {
+        type: String,
+        required: true,
+        unique: true,
+        },
+
+        totalItems: {
+        type: Number,
+        required: true,
+        min: 0,
+        default: 0,
+        },
+
+        acceptedItems: {
+        type: Number,
+        required: true,
+        min: 0,
+        default: 0,
+        },
+
+        rejectedItems: {
+        type: Number,
+        required: true,
+        min: 0,
+        default: 0,
+        },
+
+        gpAwarded: {
+        type: Number,
+        required: true,
+        min: 0,
+        default: 0,
+        },
+
+        status: {
+        type: String,
+        enum: ["PENDING", "COMPLETED", "CANCELLED"],
+        default: "PENDING",
+        },
+
+        confirmedAt: {
+        type: Date,
+        },
+    },
+    {
+        timestamps: true,
+    }
+    );
+
+    const Donation: Model<IDonation> =
+    mongoose.models.Donation ||
+    mongoose.model<IDonation>("Donation", DonationSchema);
+
+    export default Donation;
