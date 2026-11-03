@@ -47,7 +47,7 @@
             "FORGOT_PASSWORD"
         );
 
-        await sendVerificationEmail(normalizedEmail, code);
+        await sendVerificationEmail(normalizedEmail, code, "FORGOT_PASSWORD");
         }
 
         return NextResponse.json(

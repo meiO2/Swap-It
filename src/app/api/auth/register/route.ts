@@ -119,10 +119,7 @@
 
         try {
         // Send the verification email.
-        await sendVerificationEmail(
-            normalizedEmail,
-            code
-        );
+        await sendVerificationEmail(normalizedEmail, code, "REGISTER");
         } catch (emailError) {
         // Clean up if email delivery fails.
         await PendingRegistration.deleteOne({
