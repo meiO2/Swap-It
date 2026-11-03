@@ -1,0 +1,102 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #5B8A5B;
+  --color-primary-dark: #46704A;
+  --color-primary-soft: #7FB08A;
+  --color-mint-50: #EAF4EE;
+  --color-mint-100: #CFE5DB;
+  --color-mint-200: #C3E8D6;
+  --color-background: #FFFFFF;
+  --color-surface: #FFFFFF;
+  --color-ink: #1B1F1D;
+  --color-ink-muted: #6B7280;
+  --color-border: #E5E7EB;
+  --color-overlay: rgb(0 0 0 / 35%);
+  --color-accent-warm: #F2A83B;
+  --color-danger: #D64545;
+  --color-warning: #E8A317;
+  --color-success: #3E9B63;
+  --color-info: #4A90C2;
+  --color-hub-bg: #F4FAF6;
+  --color-hub-mint: #EAF5EF;
+  --color-hub-mint-strong: #D8EEE2;
+  --color-hub-ink: #10392F;
+  --color-hub-muted: #5E7168;
+  --color-hub-primary: #1D6A4E;
+  --color-hub-primary-dark: #15563E;
+  --color-hub-line: #E5EEE9;
+  --background-image-gradient-fade: linear-gradient(to bottom, #FFFFFF 0%, #DCEBE1 100%);
+  --shadow-card: 0 4px 14px rgb(91 138 91 / 15%);
+  --shadow-primary: 0 6px 20px rgb(91 138 91 / 25%);
+  --font-sans: var(--font-poppins);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--color-mint-50);
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  background: var(--color-mint-50);
+  color: var(--color-ink);
+  font-family: var(--font-poppins), sans-serif;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+.form-input {
+  width: 100%;
+  min-width: 0;
+  height: 44px;
+  border: 1px solid var(--color-border);
+  border-radius: 0.75rem;
+  background: var(--color-surface);
+  padding: 0 0.75rem;
+  color: var(--color-ink);
+  font-size: 0.75rem;
+  outline: none;
+}
+
+.form-input:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 15%, transparent);
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+::selection {
+  background: var(--color-mint-200);
+  color: var(--color-ink);
+}
+
+.swap-hub-marker {
+  border: 0;
+  background: transparent;
+}
+
+.swap-hub-heart {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 2px solid white;
+  border-radius: 50%;
+  background: var(--color-primary);
+  box-shadow: var(--shadow-card);
+  color: white;
+  font-size: 19px;
+}
