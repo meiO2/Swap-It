@@ -49,6 +49,16 @@
         );
         }
 
+        if (!user.emailVerifiedAt) {
+            return NextResponse.json(
+                {
+                    success: false,
+                    message: "Please verify your email before logging in.",
+                },
+                { status: 403 }
+            );
+        }
+
         if (!user.isActive) {
         return NextResponse.json(
             {

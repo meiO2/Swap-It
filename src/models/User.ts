@@ -3,13 +3,14 @@
     export type UserRole = "CUSTOMER" | "ADMIN" | "INSPECTOR";
 
     export interface IUser {
-    name: string;
-    email: string;
-    passwordHash: string;
-    role: UserRole;
-    phone?: string;
-    avatarUrl?: string;
-    isActive: boolean;
+        name: string;
+        email: string;
+        passwordHash: string;
+        role: UserRole;
+        phone?: string;
+        avatarUrl?: string;
+        isActive: boolean;
+        emailVerifiedAt: Date | null;
     }
 
     const UserSchema = new Schema<IUser>(
@@ -54,6 +55,11 @@
         isActive: {
         type: Boolean,
         default: true,
+        },
+
+        emailVerifiedAt: {
+        type: Date,
+        default: null,
         },
     },
     {
