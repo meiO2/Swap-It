@@ -1,3 +1,4 @@
+
     import { NextRequest, NextResponse } from "next/server";
     import { connectDB } from "@/lib/mongodb";
     import Session from "@/models/Session";
@@ -9,18 +10,16 @@
 
         const token = request.cookies.get("swapit_session")?.value;
 
-        // Revoke the current session in MongoDB.
         if (token) {
         const tokenHash = hashSessionToken(token);
-
         await Session.deleteOne({ tokenHash });
         }
 
-        // Clear the browser cookie.
         const response = NextResponse.json(
         {
             success: true,
             message: "Logout successful.",
+            data: null,
         },
         { status: 200 }
         );
@@ -41,6 +40,7 @@
         {
             success: false,
             message: "Failed to logout.",
+            data: null,
         },
         { status: 500 }
         );
