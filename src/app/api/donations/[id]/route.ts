@@ -3,6 +3,7 @@
     import mongoose from "mongoose";
     import { connectDB } from "@/lib/mongodb";
     import Donation from "@/models/Donation";
+    import { requireRole } from "@/lib/authorization";
 
     type RouteContext = {
     params: Promise<{ id: string }>;
@@ -12,7 +13,9 @@
     request: NextRequest,
     { params }: RouteContext
     ) {
-    try {
+        const auth = await requireRole(["ADMIN", "INSPECTOR"]);
+        if (!auth.success) return auth.response;
+        try {
         await connectDB();
 
         const { id } = await params;

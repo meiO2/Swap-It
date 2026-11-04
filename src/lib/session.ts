@@ -5,8 +5,6 @@
     import Session from "@/models/Session";
 
     export async function getCurrentUser() {
-    await connectDB();
-
     // Read the session cookie from the incoming request.
     const cookieStore = await cookies();
     const token = cookieStore.get("swapit_session")?.value;
@@ -14,6 +12,8 @@
     if (!token) {
         return null;
     }
+
+    await connectDB();
 
     // Hash the token before searching MongoDB.
     const tokenHash = hashSessionToken(token);

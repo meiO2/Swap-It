@@ -4,36 +4,37 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, BadgeCheck, Check, ChevronRight, MapPin, Package, Truck, X } from "lucide-react";
+import { ArrowLeft, Check, ChevronRight, MapPin, Package, Truck, X } from "lucide-react";
 import { catalogProducts, swapHubs } from "@/data/mock";
 import { couriers, type Courier } from "@/data/couriers";
-import { savedAddresses, type SavedAddress } from "@/data/addresses";
-import { estimateArrival, formatOrderDate, generatePickupCode, generateTrackingNumber } from "@/lib/orders";
-import { formatGP, formatRupiah } from "@/lib/format";
+import type { IUserAddress } from "@/models/User";
+import { estimateArrival, formatOrderDate } from "@/lib/orders";
+import { formatRupiah } from "@/lib/format";
 import { useSwapStore } from "@/store/useSwapStore";
+import { apiRequest } from "@/lib/api";
 
 const serviceFee = 5000;
 
 export default function CheckoutPage() {
   const router = useRouter();
   const cart = useSwapStore((state) => state.cart);
-  const balance = useSwapStore((state) => state.pointBatches.reduce((total, batch) => total + batch.remaining, 0));
-  const checkout = useSwapStore((state) => state.checkout);
-  const [gpPercent, setGpPercent] = useState(0);
+  const clearCart = useSwapStore((state) => state.clearCart);
   const [method, setMethod] = useState<"courier" | "pickup">("courier");
   const [courierId, setCourierId] = useState(couriers[0].id);
-  const [address, setAddress] = useState<SavedAddress>(savedAddresses[0]);
+  const [addresses, setAddresses] = useState<IUserAddress[]>([]);
+  const [address, setAddress] = useState<IUserAddress>({ id: "", name: "", phone: "", address: "", city: "", postalCode: "" });
   const [hubId, setHubId] = useState(swapHubs[0].id);
   const [addressSheetOpen, setAddressSheetOpen] = useState(false);
   const [addingAddress, setAddingAddress] = useState(false);
   const [newAddress, setNewAddress] = useState({ name: "", phone: "", address: "", city: "", postalCode: "" });
   const [addressError, setAddressError] = useState("");
+  const [addressesLoading, setAddressesLoading] = useState(true);
+  const [savingAddress, setSavingAddress] = useState(false);
   const [error, setError] = useState("");
   const [etaStart, setEtaStart] = useState<string | null>(null);
   const entries = useMemo(() => cart.map((item) => ({ item, product: catalogProducts.find((product) => product.id === item.productId) })).filter((entry) => entry.product), [cart]);
   const productValue = entries.reduce((sum, entry) => sum + entry.product!.price * entry.item.quantity, 0);
-  const maxPercent = productValue ? Math.min(100, Math.floor((balance / productValue) * 100)) : 0;
-  const gpUsed = Math.floor(productValue * gpPercent / 100);
+  const gpUsed = 0;
   const courier = couriers.find((item) => item.id === courierId) ?? couriers[0];
   const hub = swapHubs.find((item) => item.id === hubId);
   const shippingFee = method === "courier" ? courier.fee : 0;
@@ -46,42 +47,52 @@ export default function CheckoutPage() {
     return () => window.clearTimeout(timerId);
   }, []);
 
-  function addAddress() {
+  useEffect(() => {
+    apiRequest<IUserAddress[]>("/api/profile/addresses")
+      .then((saved) => {
+        setAddresses(saved);
+        if (saved.length) setAddress(saved[0]);
+      })
+      .catch((cause: unknown) => setAddressError(cause instanceof Error ? cause.message : "Could not load saved addresses."))
+      .finally(() => setAddressesLoading(false));
+  }, []);
+
+  async function addAddress() {
     const values = Object.values(newAddress).map((value) => value.trim());
     if (values.some((value) => !value)) {
       setAddressError("Complete every address field before saving.");
       return;
     }
-    const saved: SavedAddress = { id: `address-${Date.now()}`, ...newAddress, name: newAddress.name.trim(), phone: newAddress.phone.trim(), address: newAddress.address.trim(), city: newAddress.city.trim(), postalCode: newAddress.postalCode.trim() };
-    setAddress(saved);
-    setAddressSheetOpen(false);
-    setAddingAddress(false);
+    setSavingAddress(true);
     setAddressError("");
+    try {
+      const saved = await apiRequest<IUserAddress>("/api/profile/addresses", { method: "POST", body: JSON.stringify(newAddress) });
+      setAddresses((current) => [...current, saved]);
+      setAddress(saved);
+      setAddressSheetOpen(false);
+      setAddingAddress(false);
+      setNewAddress({ name: "", phone: "", address: "", city: "", postalCode: "" });
+    } catch (cause) {
+      setAddressError(cause instanceof Error ? cause.message : "Could not save this address.");
+    } finally {
+      setSavingAddress(false);
+    }
   }
 
-  function completeCheckout() {
+  async function completeCheckout() {
     if (!entries.length || !methodValid || !hub) return;
     try {
-      const orderId = checkout({
-        items: entries.map(({ item, product }) => ({ productId: product!.id, productValue: product!.price * item.quantity, quantity: item.quantity })),
-        productValue,
-        shippingFee,
-        serviceFee,
-        gpUsed,
-        delivery: method === "courier"
-          ? {
-              method,
-              courier: { id: courier.id, name: courier.name, fee: courier.fee, minDays: courier.minDays, maxDays: courier.maxDays },
-              address,
-              trackingNumber: generateTrackingNumber(courier.id === "sicepat-reg" ? "SCP" : courier.id === "jnt-express" ? "JNT" : "JNE"),
-            }
-          : {
-              method,
-              hub: { id: hub.id, name: hub.name, address: hub.address, distance: hub.distance, openingHours: hub.openingHours, position: hub.position },
-              pickupCode: generatePickupCode(),
-            },
+      const order = await apiRequest<{ id: string }>("/api/orders", {
+        method: "POST",
+        body: JSON.stringify({
+          items: entries.map(({ item, product }) => ({ productId: product!.id, quantity: item.quantity })),
+          delivery: method === "courier"
+            ? { method, courierId: courier.id, addressId: address.id }
+            : { method, hubId: hub.id },
+        }),
       });
-      router.push(`/orders/${orderId}?placed=1`);
+      clearCart();
+      router.push(`/orders/${order.id}?placed=1`);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Checkout could not be completed.");
     }
@@ -114,7 +125,7 @@ export default function CheckoutPage() {
               <>
                 <div className="mt-3 flex items-start gap-3 rounded-2xl bg-mint-50 p-3">
                   <MapPin size={18} className="mt-0.5 shrink-0 text-primary" />
-                  <div className="min-w-0 flex-1"><p className="text-[10px] font-medium text-ink-muted">Deliver to</p><p className="text-xs font-semibold text-ink">{address.name} · {address.phone}</p><p className="mt-0.5 text-xs leading-relaxed text-ink-muted">{address.address}, {address.city} {address.postalCode}</p></div>
+                  <div className="min-w-0 flex-1"><p className="text-[10px] font-medium text-ink-muted">Deliver to</p>{address.id ? <><p className="text-xs font-semibold text-ink">{address.name} · {address.phone}</p><p className="mt-0.5 text-xs leading-relaxed text-ink-muted">{address.address}, {address.city} {address.postalCode}</p></> : <><p className="text-xs text-ink-muted">{addressesLoading ? "Loading saved addresses…" : "No saved delivery address."}</p><Link href="/profile/settings" className="mt-1 inline-block text-xs font-semibold text-primary">Add address in Settings</Link></>}</div>
                   <button type="button" onClick={() => { setAddressSheetOpen(true); setAddingAddress(false); }} className="min-h-11 shrink-0 px-1 text-xs font-semibold text-primary">Change</button>
                 </div>
                 <div className="mt-4 flex items-center justify-between"><h3 className="text-sm font-semibold text-ink">Choose a courier</h3><span className="text-[10px] text-ink-muted">{eta ? `${formatOrderDate(eta.from)}–${formatOrderDate(eta.to)}` : "Calculating ETA…"}</span></div>
@@ -139,23 +150,20 @@ export default function CheckoutPage() {
           </section>
 
           <section className="mt-4 rounded-3xl bg-white p-4 shadow-card">
-            <div className="flex items-center justify-between"><h2 className="text-base font-semibold text-ink">Green Points</h2><span className="text-xs text-primary">{formatGP(balance)} available</span></div>
-            <p className="mt-1 text-xs text-ink-muted">Apply points to product value only. 1 GP = Rp1.</p>
-            <div className="mt-4 flex items-center justify-between gap-3"><label htmlFor="gp-percent" className="text-xs font-medium text-ink">Pay with GP</label><span className="rounded-full bg-mint-50 px-2.5 py-1 text-xs font-semibold text-primary">{gpPercent}%</span></div>
-            <input id="gp-percent" aria-label="Percent of product value to pay with Green Points" type="range" min="0" max={maxPercent} step="1" value={gpPercent} onChange={(event) => setGpPercent(Number(event.target.value))} className="mt-3 w-full accent-primary" />
-            <div className="mt-1 flex justify-between text-[10px] text-ink-muted"><span>Money only</span><span>Up to {maxPercent}% with GP</span></div>
-            <div className="mt-3 flex items-center gap-2 rounded-xl bg-mint-50 p-3 text-xs text-ink-muted"><BadgeCheck size={15} className="shrink-0 text-primary" />Shipping and service fees are paid separately in money.</div>
+            <div className="flex items-center justify-between"><h2 className="text-base font-semibold text-ink">Green Points</h2><span className="text-xs text-ink-muted">Unavailable at checkout</span></div>
+            <p className="mt-2 text-xs leading-relaxed text-ink-muted">Wallet balances are currently local demo data and are not deducted by the backend. Green Points cannot be applied until a wallet API is available.</p>
           </section>
           <section className="mt-4 rounded-3xl bg-white p-4 shadow-card">
             <h2 className="mb-3 text-base font-semibold text-ink">Price breakdown</h2>
+            <p className="mb-3 rounded-xl bg-warning/10 p-3 text-xs leading-relaxed text-ink">Prototype checkout only: this saves an order record but does not collect payment.</p>
             <BreakdownRow label="Delivery" value={method === "courier" ? `${courier.name} to ${address.city}` : `Pickup at ${hub?.name ?? "Swap Hub"}`} />
             <BreakdownRow label="Product value" amount={productValue} />
             <BreakdownRow label="Green Points applied" amount={-gpUsed} muted />
             <BreakdownRow label="Shipping fee" value={method === "pickup" ? "Free pickup" : formatRupiah(shippingFee)} />
-            <BreakdownRow label="Service fee (demo)" amount={serviceFee} />
+            <BreakdownRow label="Service fee (prototype)" amount={serviceFee} />
             <div className="my-3 border-t border-border" />
             <div className="flex justify-between text-sm font-semibold text-ink"><span>Pay now in money</span><span>{formatRupiah(moneyTotal)}</span></div>
-            <p className="mt-3 text-xs text-primary">You&apos;ll earn {formatGP(Math.floor(productValue * 0.02))} after the order is completed.</p>
+            <p className="mt-3 text-xs text-ink-muted">Green Point rewards are not issued because no wallet integration is available.</p>
           </section>
           {!methodValid && <p className="mt-3 text-xs text-warning">Choose a valid delivery address, courier, or pickup Hub to continue.</p>}
           {error && <p role="alert" className="mt-3 rounded-xl bg-danger/10 p-3 text-xs text-danger">{error}</p>}
@@ -169,7 +177,7 @@ export default function CheckoutPage() {
             {!addingAddress ? (
               <>
                 <div className="space-y-2">
-                  {savedAddresses.map((item) => <button key={item.id} type="button" onClick={() => { setAddress(item); setAddressSheetOpen(false); }} className={`w-full rounded-2xl border p-3 text-left ${address.id === item.id ? "border-primary bg-mint-50" : "border-border"}`}><span className="block text-sm font-semibold text-ink">{item.name} <span className="text-xs font-normal text-ink-muted">· {item.phone}</span></span><span className="mt-1 block text-xs text-ink-muted">{item.address}, {item.city} {item.postalCode}</span></button>)}
+                  {addressesLoading ? <p role="status" className="py-3 text-xs text-ink-muted">Loading saved addresses…</p> : addresses.length ? addresses.map((item) => <button key={item.id} type="button" onClick={() => { setAddress(item); setAddressSheetOpen(false); }} className={`w-full rounded-2xl border p-3 text-left ${address.id === item.id ? "border-primary bg-mint-50" : "border-border"}`}><span className="block text-sm font-semibold text-ink">{item.name} <span className="text-xs font-normal text-ink-muted">· {item.phone}</span></span><span className="mt-1 block text-xs text-ink-muted">{item.address}, {item.city} {item.postalCode}</span></button>) : <p className="py-3 text-xs text-ink-muted">No saved addresses yet. Add one to use courier delivery.</p>}
                 </div>
                 <button type="button" onClick={() => setAddingAddress(true)} className="mt-3 min-h-11 w-full rounded-full border border-primary px-4 text-sm font-semibold text-primary">Add new address</button>
               </>
@@ -179,7 +187,7 @@ export default function CheckoutPage() {
                   ["name", "Full name"], ["phone", "Phone number"], ["address", "Street address"], ["city", "City"], ["postalCode", "Postal code"],
                 ] as const).map(([field, label]) => <label key={field} className="block text-xs font-medium text-ink">{label}<input required aria-label={label} value={newAddress[field]} onChange={(event) => setNewAddress((current) => ({ ...current, [field]: event.target.value }))} className="form-input mt-1" /></label>)}
                 {addressError && <p role="alert" className="text-xs text-danger">{addressError}</p>}
-                <button type="button" onClick={addAddress} className="min-h-11 w-full rounded-full bg-primary text-sm font-semibold text-white">Save address</button>
+                <button type="button" disabled={savingAddress} onClick={() => void addAddress()} className="min-h-11 w-full rounded-full bg-primary text-sm font-semibold text-white disabled:opacity-60">{savingAddress ? "Saving…" : "Save address"}</button>
               </div>
             )}
           </section>

@@ -60,9 +60,6 @@ export default function HomePage() {
           </div>
         </div>
       </section>
-      <footer className="px-4 pb-2 text-center">
-        <Link href="/design-system" className="text-xs text-ink-muted underline decoration-border underline-offset-4">SwapIt design system</Link>
-      </footer>
     </main>
   );
 }

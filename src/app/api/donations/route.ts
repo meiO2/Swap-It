@@ -1,38 +1,29 @@
 
     import { NextRequest, NextResponse } from "next/server";
-    import mongoose from "mongoose";
     import { connectDB } from "@/lib/mongodb";
     import Donation from "@/models/Donation";
     import { randomUUID } from "crypto";
+    import { requireAuth } from "@/lib/authorization";
 
     export async function POST(request: NextRequest) {
-    try {
-        await connectDB();
+        const auth = await requireAuth();
+        if (!auth.success) return auth.response;
+        try {
+            await connectDB();
 
-        const body = await request.json();
-        const { userId, hubId } = body;
+            const body = await request.json();
+            const { hubId } = body;
 
-        // Validate required fields
-        if (!userId || !hubId) {
-        return NextResponse.json(
-            {
-            success: false,
-            message: "userId and hubId are required.",
-            },
-            { status: 400 }
-        );
-        }
-
-        // Validate MongoDB ObjectId
-        if (!mongoose.Types.ObjectId.isValid(userId)) {
-        return NextResponse.json(
-            {
-            success: false,
-            message: "Invalid userId.",
-            },
-            { status: 400 }
-        );
-        }
+            // Validate required fields
+            if (!hubId) {
+            return NextResponse.json(
+                {
+                success: false,
+                message: "hubId is required.",
+                },
+                { status: 400 }
+            );
+            }
 
         if (typeof hubId !== "string" || !hubId.trim()) {
         return NextResponse.json(
@@ -46,7 +37,7 @@
 
         // Create a new donation session
         const donation = await Donation.create({
-        userId,
+        userId: auth.user.id,
         hubId: hubId.trim(),
         sessionId: randomUUID(),
         totalItems: 0,
@@ -78,36 +69,14 @@
     }
 
     
-    export async function GET(request: NextRequest) {
-    try {
-        await connectDB();
+    export async function GET() {
+        const auth = await requireAuth();
+        if (!auth.success) return auth.response;
+        try {
+            await connectDB();
 
-        const { searchParams } = new URL(request.url);
-        const userId = searchParams.get("userId");
-
-        // Validate userId
-        if (!userId) {
-        return NextResponse.json(
-            {
-            success: false,
-            message: "userId is required.",
-            },
-            { status: 400 }
-        );
-        }
-
-        if (!mongoose.Types.ObjectId.isValid(userId)) {
-        return NextResponse.json(
-            {
-            success: false,
-            message: "Invalid userId.",
-            },
-            { status: 400 }
-        );
-        }
-
-        // Retrieve donations belonging to this user
-        const donations = await Donation.find({ userId })
+            // Retrieve donations belonging to this user
+            const donations = await Donation.find({ userId: auth.user.id })
         .sort({ createdAt: -1 })
         .lean();
 

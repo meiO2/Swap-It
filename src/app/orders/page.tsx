@@ -1,11 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ArrowLeft, PackageSearch } from "lucide-react";
 import OrderCard from "@/components/orders/OrderCard";
-import { useSwapStore } from "@/store/useSwapStore";
 import type { OrderShape } from "@/lib/orders";
+import { apiRequest } from "@/lib/api";
 
 const filters = ["All", "Processing", "Shipping / Ready", "Completed", "Cancelled"] as const;
 type Filter = (typeof filters)[number];
@@ -19,9 +19,18 @@ function matchesFilter(order: OrderShape, filter: Filter) {
 }
 
 export default function OrdersPage() {
-  const orders = useSwapStore((state) => state.orders);
+  const [orders, setOrders] = useState<OrderShape[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [filter, setFilter] = useState<Filter>("All");
   const filteredOrders = orders.filter((order) => matchesFilter(order, filter));
+
+  useEffect(() => {
+    apiRequest<OrderShape[]>("/api/orders")
+      .then(setOrders)
+      .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "Could not load your orders."))
+      .finally(() => setLoading(false));
+  }, []);
 
   return (
     <main className="min-h-dvh px-4 pb-8 pt-5">
@@ -29,7 +38,8 @@ export default function OrdersPage() {
       <div role="tablist" aria-label="Filter orders" className="-mx-4 mb-4 flex gap-2 overflow-x-auto px-4 pb-1">
         {filters.map((item) => <button key={item} type="button" role="tab" aria-selected={filter === item} onClick={() => setFilter(item)} className={`min-h-10 shrink-0 rounded-full px-4 text-xs font-semibold ${filter === item ? "bg-primary text-white" : "bg-white text-ink-muted shadow-card"}`}>{item}</button>)}
       </div>
-      {filteredOrders.length ? (
+      {error && <p role="alert" className="mb-3 rounded-xl bg-danger/10 p-3 text-xs text-danger">{error}</p>}
+      {loading ? <p role="status" className="rounded-2xl bg-white p-5 text-sm text-ink-muted">Loading orders…</p> : filteredOrders.length ? (
         <div className="space-y-3">{filteredOrders.map((order) => <OrderCard key={order.id} order={order} />)}</div>
       ) : (
         <section className="rounded-3xl bg-white p-6 text-center shadow-card">

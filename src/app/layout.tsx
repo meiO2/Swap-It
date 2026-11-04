@@ -3,6 +3,7 @@ import { Poppins } from "next/font/google";
 import { Suspense } from "react";
 import type { ReactNode } from "react";
 import AppShell from "@/components/layout/AppShell";
+import { AuthProvider } from "@/components/auth/AuthProvider";
 import "leaflet/dist/leaflet.css";
 import "./globals.css";
 
@@ -22,7 +23,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="en" className={poppins.variable}>
       <body className="min-h-dvh">
         <Suspense fallback={<div className="mx-auto min-h-dvh w-full max-w-[430px] bg-background">{children}</div>}>
-          <AppShell>{children}</AppShell>
+          <AuthProvider><AppShell>{children}</AppShell></AuthProvider>
         </Suspense>
       </body>
     </html>

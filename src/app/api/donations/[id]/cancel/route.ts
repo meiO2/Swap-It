@@ -2,6 +2,7 @@
     import mongoose from "mongoose";
     import { connectDB } from "@/lib/mongodb";
     import Donation from "@/models/Donation";
+    import { requireAuth } from "@/lib/authorization";
 
     type RouteContext = {
     params: Promise<{ id: string }>;
@@ -11,7 +12,9 @@
     request: Request,
     { params }: RouteContext
     ) {
-    try {
+        const auth = await requireAuth();
+        if (!auth.success) return auth.response;
+        try {
         await connectDB();
 
         const { id } = await params;
@@ -26,6 +29,7 @@
         const donation = await Donation.findOneAndUpdate(
         {
             _id: id,
+            userId: auth.user.id,
             status: "PENDING",
         },
         {
@@ -40,7 +44,7 @@
         );
 
         if (!donation) {
-        const existingDonation = await Donation.findById(id);
+        const existingDonation = await Donation.findOne({ _id: id, userId: auth.user.id });
 
         if (!existingDonation) {
             return NextResponse.json(

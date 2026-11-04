@@ -11,6 +11,16 @@
         avatarUrl?: string;
         isActive: boolean;
         emailVerifiedAt: Date | null;
+        addresses: IUserAddress[];
+    }
+
+    export interface IUserAddress {
+        id: string;
+        name: string;
+        phone: string;
+        address: string;
+        city: string;
+        postalCode: string;
     }
 
     const UserSchema = new Schema<IUser>(
@@ -61,6 +71,15 @@
         type: Date,
         default: null,
         },
+
+        addresses: [{
+            id: { type: String, required: true },
+            name: { type: String, required: true, trim: true, maxlength: 100 },
+            phone: { type: String, required: true, trim: true, maxlength: 30 },
+            address: { type: String, required: true, trim: true, maxlength: 300 },
+            city: { type: String, required: true, trim: true, maxlength: 100 },
+            postalCode: { type: String, required: true, trim: true, maxlength: 20 },
+        }],
     },
     {
         timestamps: true,

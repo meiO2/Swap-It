@@ -1,7 +1,8 @@
-    import { NextResponse } from "next/server";
+    import { connection, NextResponse } from "next/server";
     import { getCurrentUser } from "@/lib/session";
 
     export async function GET() {
+    await connection();
     try {
         const user = await getCurrentUser();
 
