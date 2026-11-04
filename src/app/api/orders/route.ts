@@ -1,96 +1,192 @@
-import { NextResponse, type NextRequest } from "next/server";
-import { catalogProducts, swapHubs } from "@/data/mock";
-import { couriers } from "@/data/couriers";
+import { NextRequest, NextResponse } from "next/server";
+import mongoose from "mongoose";
 import { requireAuth } from "@/lib/authorization";
-import { buildTimeline, estimateArrival, generatePickupCode, type OrderShape } from "@/lib/orders";
 import { connectDB } from "@/lib/mongodb";
-import Order from "@/models/Order";
-import User from "@/models/User";
+import Cart from "@/models/Cart";
+import Order, {
+  type DeliveryMethod,
+  type IOrderAddress,
+} from "@/models/Order";
+import Product from "@/models/Product";
 
-const serviceFee = 5000;
+const PAYMENT_EXPIRY_MINUTES = 30;
+
+function isAddress(value: unknown): value is IOrderAddress {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const address = value as Record<string, unknown>;
+  return ["name", "phone", "address", "city", "postalCode"].every(
+    (field) => typeof address[field] === "string" && address[field].trim(),
+  );
+}
+
+function isDeliveryMethod(value: unknown): value is DeliveryMethod {
+  return value === "courier" || value === "pickup";
+}
 
 export async function GET() {
-  const auth = await requireAuth();
-  if (!auth.success) return auth.response;
   try {
+    const auth = await requireAuth();
+    if (!auth.success) return auth.response;
     await connectDB();
-    const orders = await Order.find({ userId: auth.user.id }).sort({ createdAt: -1 }).lean();
-    return NextResponse.json({ success: true, data: orders.map((order) => ({ ...order, id: String(order._id) })) });
+
+    const userId = new mongoose.Types.ObjectId(auth.user.id);
+    const orders = await Order.find({
+      $or: [{ buyerId: userId }, { "items.sellerId": userId }],
+    })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    return NextResponse.json({ success: true, data: orders });
   } catch (error) {
     console.error("Get orders error:", error);
-    return NextResponse.json({ success: false, message: "Could not load your orders." }, { status: 500 });
+    return NextResponse.json(
+      { success: false, message: "Failed to retrieve orders." },
+      { status: 500 },
+    );
   }
 }
 
 export async function POST(request: NextRequest) {
-  const auth = await requireAuth();
-  if (!auth.success) return auth.response;
   try {
-    const body: unknown = await request.json();
-    if (typeof body !== "object" || body === null || Array.isArray(body)) return NextResponse.json({ success: false, message: "Provide valid order details." }, { status: 400 });
-    const input = body as Record<string, unknown>;
-    if (!Array.isArray(input.items) || input.items.length === 0 || typeof input.delivery !== "object" || input.delivery === null || Array.isArray(input.delivery)) {
-      return NextResponse.json({ success: false, message: "Add at least one product and choose a delivery method." }, { status: 400 });
-    }
-    const itemsInput = input.items as Array<Record<string, unknown>>;
-    const items: OrderShape["items"] = [];
-    for (const item of itemsInput) {
-      const product = catalogProducts.find((entry) => entry.id === item.productId);
-      if (!product || !Number.isInteger(item.quantity) || Number(item.quantity) < 1 || Number(item.quantity) > 20) {
-        return NextResponse.json({ success: false, message: "One or more cart items are invalid." }, { status: 400 });
-      }
-      items.push({ productId: product.id, quantity: Number(item.quantity), productValue: product.price * Number(item.quantity) });
-    }
-    const deliveryInput = input.delivery as Record<string, unknown>;
+    const auth = await requireAuth();
+    if (!auth.success) return auth.response;
     await connectDB();
-    let delivery: NonNullable<OrderShape["delivery"]>;
-    let shippingFee = 0;
-    let estimatedArrival: string | undefined;
-    if (deliveryInput.method === "courier") {
-      if (typeof deliveryInput.courierId !== "string" || typeof deliveryInput.addressId !== "string") {
-        return NextResponse.json({ success: false, message: "Choose a courier and a saved delivery address." }, { status: 400 });
-      }
-      const courier = couriers.find((entry) => entry.id === deliveryInput.courierId);
-      const user = await User.findById(auth.user.id).select("addresses").lean();
-      const address = user?.addresses.find((entry) => entry.id === deliveryInput.addressId);
-      if (!courier || !address) return NextResponse.json({ success: false, message: "Courier or saved address not found." }, { status: 400 });
-      shippingFee = courier.fee;
-      delivery = {
-        method: "courier",
-        courier: { id: courier.id, name: courier.name, fee: courier.fee, minDays: courier.minDays, maxDays: courier.maxDays },
-        address,
-      };
-    } else if (deliveryInput.method === "pickup" && typeof deliveryInput.hubId === "string") {
-      const hub = swapHubs.find((entry) => entry.id === deliveryInput.hubId);
-      if (!hub) return NextResponse.json({ success: false, message: "Choose a valid Swap Hub." }, { status: 400 });
-      delivery = { method: "pickup", hub, pickupCode: generatePickupCode() };
-    } else {
-      return NextResponse.json({ success: false, message: "Choose a valid delivery method." }, { status: 400 });
+
+    const body = await request.json();
+    if (!isDeliveryMethod(body?.deliveryMethod)) {
+      return NextResponse.json(
+        { success: false, message: "deliveryMethod must be courier or pickup." },
+        { status: 400 },
+      );
     }
-    const productValue = items.reduce((total, item) => total + item.productValue, 0);
-    const createdAt = new Date().toISOString();
-    if (delivery.courier) estimatedArrival = estimateArrival(createdAt, delivery.courier.minDays, delivery.courier.maxDays).to;
-    const timeline = buildTimeline(delivery.method, createdAt, 0);
-    const order = await Order.create({
-      userId: auth.user.id,
-      items,
-      productValue,
-      shippingFee,
-      serviceFee,
-      gpUsed: 0,
-      moneyPaid: productValue + shippingFee + serviceFee,
-      status: "Processing",
-      createdAt,
-      rewardGranted: false,
-      delivery,
-      timeline,
-      estimatedArrival,
-      qcStatus: "pending",
-      rewardEligible: true,
-    });
-    return NextResponse.json({ success: true, data: { ...order.toObject(), id: String(order._id) } }, { status: 201 });
+    if (body.deliveryMethod === "courier" && !isAddress(body.shippingAddress)) {
+      return NextResponse.json(
+        { success: false, message: "A valid shippingAddress is required for courier delivery." },
+        { status: 400 },
+      );
+    }
+
+    const session = await mongoose.startSession();
+    const paymentSummary = {
+      expiresAt: new Date(0),
+      totalAmount: 0,
+    };
+    const responseOrder: { value: unknown } = {
+      value: null,
+    };
+    try {
+      await session.withTransaction(async () => {
+        const cart = await Cart.findOne({ userId: auth.user.id }).session(session);
+        if (!cart || cart.items.length === 0) {
+          throw new Error("Your cart is empty.");
+        }
+
+        const productIds = cart.items.map((item) => item.productId);
+        const products = await Product.find({
+          _id: { $in: productIds },
+          status: "AVAILABLE",
+        }).session(session);
+        if (products.length !== productIds.length) {
+          throw new Error("One or more products are no longer available.");
+        }
+
+        const buyerId = auth.user.id;
+        if (products.some((product) => product.sellerId.toString() === buyerId)) {
+          throw new Error("You cannot buy your own product.");
+        }
+
+        const items = products.map((product) => ({
+          productId: product._id,
+          sellerId: product.sellerId,
+          name: product.name,
+          price: product.price,
+          image: product.images[0],
+        }));
+        const subtotal = items.reduce((total, item) => total + item.price, 0);
+        const shippingFee = 0;
+        const serviceFee = 0;
+        const gpUsed = 0;
+        const totalAmount = subtotal + shippingFee + serviceFee - gpUsed;
+        const expiresAt = new Date(
+          Date.now() + PAYMENT_EXPIRY_MINUTES * 60 * 1000,
+        );
+
+        const created = await Order.create(
+          [
+            {
+              buyerId,
+              items,
+              subtotal,
+              shippingFee,
+              serviceFee,
+              gpUsed,
+              totalAmount,
+              deliveryMethod: body.deliveryMethod,
+              shippingAddress:
+                body.deliveryMethod === "courier"
+                  ? {
+                      name: body.shippingAddress.name.trim(),
+                      phone: body.shippingAddress.phone.trim(),
+                      address: body.shippingAddress.address.trim(),
+                      city: body.shippingAddress.city.trim(),
+                      postalCode: body.shippingAddress.postalCode.trim(),
+                    }
+                  : undefined,
+              status: "PENDING_PAYMENT",
+              expiresAt,
+            },
+          ],
+          { session },
+        );
+        responseOrder.value = created[0].toObject();
+        paymentSummary.expiresAt = expiresAt;
+        paymentSummary.totalAmount = totalAmount;
+
+        const reserved = await Product.updateMany(
+          { _id: { $in: productIds }, status: "AVAILABLE" },
+          { $set: { status: "RESERVED" } },
+          { session },
+        );
+        if (reserved.modifiedCount !== productIds.length) {
+          throw new Error("Products changed availability during checkout.");
+        }
+        await Cart.updateOne(
+          { userId: auth.user.id },
+          { $set: { items: [] } },
+          { session },
+        );
+      });
+    } finally {
+      await session.endSession();
+    }
+
+    return NextResponse.json(
+      {
+        success: true,
+        message: "Order created and products reserved.",
+        data: responseOrder.value,
+        payment: {
+          status: "PENDING_PAYMENT",
+          expiresAt: paymentSummary.expiresAt,
+          amount: paymentSummary.totalAmount,
+        },
+      },
+      { status: 201 },
+    );
   } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to create order.";
+    const status = [
+      "Your cart is empty.",
+      "One or more products are no longer available.",
+      "You cannot buy your own product.",
+      "Products changed availability during checkout.",
+    ].includes(message)
+      ? 409
+      : 500;
     console.error("Create order error:", error);
-    return NextResponse.json({ success: false, message: "Could not place this order." }, { status: 500 });
+    return NextResponse.json(
+      { success: false, message: status === 500 ? "Failed to create order." : message },
+      { status },
+    );
   }
 }
