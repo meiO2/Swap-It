@@ -8,6 +8,15 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 All cart endpoints require the session cookie. A seller cannot add their own product, and each listing can only appear once in a cart.
 
+## Order API
+
+- `POST /api/orders` creates an order from the authenticated user's cart, validates availability, reserves products, and clears the cart.
+- `GET /api/orders` returns orders where the user is the buyer or one of the sellers.
+- `GET /api/orders/:id` returns an order visible to the buyer or its sellers.
+- `POST /api/orders/:id/cancel` cancels a pending-payment order and releases reserved products.
+
+Order creation currently uses `shippingFee: 0`, `serviceFee: 0`, and `gpUsed: 0` until delivery pricing and server-side Green Point storage are defined. Product prices and the final total are always calculated from MongoDB.
+
 ## Getting Started
 
 First, run the development server:
