@@ -1,5 +1,12 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
-PI is used for protected operations.
+
+## Cart API
+
+- `GET /api/cart` returns the authenticated user's cart, item count, and server-calculated subtotal.
+- `POST /api/cart` adds one available product. Body: `{ "productId": "..." }`.
+- `DELETE /api/cart` removes a product. Body: `{ "productId": "..." }`.
+
+All cart endpoints require the session cookie. A seller cannot add their own product, and each listing can only appear once in a cart.
 
 ## Getting Started
 
