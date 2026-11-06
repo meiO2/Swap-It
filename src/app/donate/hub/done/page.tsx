@@ -1,15 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
+import { useEffect, useState } from "react";
 import { Check, Home, Newspaper, WalletCards } from "lucide-react";
 import { HubStepGuard, StickyActions, hubPrimaryButton, hubSecondaryButton } from "@/components/hub/hub-ui";
-import { GP_PER_ITEM } from "@/lib/hub";
 import { formatGP } from "@/lib/format";
 import { useHubSession } from "@/store/hubSession";
-import { useSwapStore } from "@/store/useSwapStore";
-import { getAvailablePointBalance } from "@/lib/gp";
+import { apiRequest } from "@/lib/api";
 
 const confetti = [
   { left: "13%", top: "38%", color: "bg-hub-primary", rotate: -22 },
@@ -23,36 +21,37 @@ const confetti = [
 ];
 
 function DoneContent() {
+  const itemCount = useHubSession((state) => state.itemCount);
   const status = useHubSession((state) => state.status);
   const code = useHubSession((state) => state.code);
-  const itemCount = useHubSession((state) => state.itemCount);
-  const reset = useHubSession((state) => state.reset);
-  const addDonationReward = useSwapStore((state) => state.addDonationReward);
-  const pointBatches = useSwapStore((state) => state.pointBatches);
-  const donationReceipts = useSwapStore((state) => state.donationReceipts);
-  const [now, setNow] = useState<number | null>(null);
+  const donationId = useHubSession((state) => state.donationId);
+  const [rewardAmount, setRewardAmount] = useState<number | null>(null);
+  const [walletBalance, setWalletBalance] = useState<number | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    const timerId = window.setTimeout(() => setNow(Date.now()), 0);
-    return () => window.clearTimeout(timerId);
-  }, []);
+    if (status !== "confirmed" || !code || !donationId || !itemCount) return;
+    let active = true;
+    apiRequest<{ gpAwarded: number }>(`/api/donations/${encodeURIComponent(donationId)}/complete`, {
+      method: "POST",
+      body: JSON.stringify({ itemCount }),
+    })
+      .then((donation) => {
+        if (active) setRewardAmount(donation.gpAwarded);
+      })
+      .catch((reason: unknown) => {
+        if (active) setError(reason instanceof Error ? reason.message : "The donation reward could not be added.");
+      });
+    return () => {
+      active = false;
+    };
+  }, [code, donationId, itemCount, status]);
 
   useEffect(() => {
-    if (status !== "confirmed" || !code || !itemCount) return;
-    const amount = itemCount * GP_PER_ITEM;
-    try {
-      addDonationReward(code, itemCount, amount, new Date());
-      reset();
-    } catch (reason) {
-      console.error("Could not credit the donation reward.", reason);
-      const message = reason instanceof Error ? reason.message : "The donation reward could not be added.";
-      window.setTimeout(() => setError(message), 0);
-    }
-  }, [addDonationReward, code, itemCount, reset, status]);
-
-  const summary = donationReceipts.find((receipt) => receipt.id === code) ?? donationReceipts[donationReceipts.length - 1];
-  const walletBalance = now === null ? 0 : getAvailablePointBalance(pointBatches, new Date(now));
+    apiRequest<{ balance: number }>("/api/green-points")
+      .then((data) => setWalletBalance(data.balance))
+      .catch((reason: unknown) => console.error("Could not load Green Point balance.", reason));
+  }, [rewardAmount]);
 
   return (
     <HubStepGuard step="done">
@@ -74,12 +73,11 @@ function DoneContent() {
         <p className="mt-2 max-w-xs text-sm leading-relaxed text-hub-muted">Your clothes are on their way to a second life.</p>
 
         <section className="mt-6 w-full rounded-3xl bg-white p-4 text-left shadow-card" aria-live="polite">
-          <SummaryRow label="Items donated" value={summary ? `${summary.itemCount} ${summary.itemCount === 1 ? "piece" : "pieces"}` : "Updating…"} />
-          <SummaryRow label="GP added" value={summary ? formatGP(summary.amount) : "Updating…"} />
-          <SummaryRow label="New wallet balance" value={now === null ? "Updating…" : formatGP(walletBalance)} last />
+          <SummaryRow label="Items donated" value={`${itemCount} ${itemCount === 1 ? "piece" : "pieces"}`} />
+          <SummaryRow label="GP added" value={rewardAmount === null ? "Updating…" : formatGP(rewardAmount)} />
+          <SummaryRow label="New wallet balance" value={walletBalance === null ? "Updating…" : formatGP(walletBalance)} last />
         </section>
         {error && <p role="alert" className="mt-3 w-full rounded-xl bg-red-50 p-3 text-left text-xs text-danger">{error}</p>}
-
         <StickyActions>
           <Link href="/wallet" className={hubPrimaryButton}><WalletCards size={17} /> View wallet</Link>
           <Link href="/news" className={hubSecondaryButton}><Newspaper size={17} /> Read Swap News</Link>

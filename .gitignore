@@ -44,3 +44,6 @@ next-env.d.ts
 
 # ESP32 private credentials
 /SwapHub_ESP32/config/secrets.h
+# user-uploaded product images
+/public/uploads/*
+!/public/uploads/.gitkeep

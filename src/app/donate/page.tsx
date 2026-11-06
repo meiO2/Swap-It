@@ -4,14 +4,21 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { ArrowRight, Box, Gift, Leaf, MapPin, QrCode, Shirt, Star, X } from "lucide-react";
 import { OPEN_DONATION_BOX_IMAGE } from "@/lib/assets";
-import { swapHubs } from "@/data/mock";
-import { StepRow, StickyActions, hubPrimaryButton } from "@/components/hub/hub-ui";
+import { StepRow, StickyActions, hubPrimaryButton, useSwapHubs } from "@/components/hub/hub-ui";
 import { useHubSession } from "@/store/hubSession";
 
 export default function DonatePage() {
   const router = useRouter();
   const startSession = useHubSession((state) => state.startSession);
-  const nearestHub = swapHubs[0];
+  const { hubs, loading } = useSwapHubs();
+  const nearestHub = hubs[0];
+
+  if (loading) {
+    return <main className="p-6"><p className="text-sm text-hub-muted">Loading Swap Hubs…</p></main>;
+  }
+  if (!nearestHub) {
+    return <main className="p-6"><h1 className="text-xl font-bold">Donation is unavailable</h1><p className="mt-2 text-sm text-hub-muted">No Swap Hub is configured yet.</p><button type="button" onClick={() => router.push("/")} className="mt-5 rounded-full bg-hub-primary px-5 py-3 text-sm font-semibold text-white">Back home</button></main>;
+  }
 
   function beginDonation() {
     startSession();

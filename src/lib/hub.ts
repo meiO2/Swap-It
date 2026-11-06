@@ -1,5 +1,5 @@
 export const QR_TTL_SECONDS = 300;
-export const GP_PER_ITEM = 100;
+export const GP_PER_ITEM = 1500;
 export const MAX_DONATION_ITEMS = 30;
 
 export function createDonationCode(): string {

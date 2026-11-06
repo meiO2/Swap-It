@@ -76,7 +76,10 @@
             await connectDB();
 
             // Retrieve donations belonging to this user
-            const donations = await Donation.find({ userId: auth.user.id })
+            const query = ["ADMIN", "INSPECTOR"].includes(auth.user.role)
+                ? {}
+                : { userId: auth.user.id };
+            const donations = await Donation.find(query)
         .sort({ createdAt: -1 })
         .lean();
 

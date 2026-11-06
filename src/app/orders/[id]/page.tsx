@@ -27,6 +27,7 @@ function OrderDetailsContent() {
   const [notice, setNotice] = useState(() => searchParams.get("placed") === "1" ? "Prototype order record created; no payment was collected." : "");
   const [helpOpen, setHelpOpen] = useState(false);
   const [error, setError] = useState("");
+  const [cancelling, setCancelling] = useState(false);
   const product = useMemo(() => order?.items[0] ? catalogProducts.find((item) => item.id === order.items[0].productId) : undefined, [order]);
   const latestEvent = order?.trackingEvents?.slice().sort((a, b) => Date.parse(b.at) - Date.parse(a.at))[0];
   useEffect(() => {
@@ -48,11 +49,40 @@ function OrderDetailsContent() {
       console.error(`Could not copy ${label.toLowerCase()}.`, reason);
       setError(`Could not copy ${label.toLowerCase()}. Please select and copy it manually.`);
     }
+
+  }
+
+  async function cancelPendingOrder() {
+    if (!order || cancelling) return;
+    if (!window.confirm("Cancel this pending payment order and return the item to the marketplace?")) return;
+
+    try {
+      setCancelling(true);
+      setError("");
+      await apiRequest(`/api/orders/${encodeURIComponent(order.id)}/cancel`, {
+        method: "POST",
+      });
+      setNotice("Order cancelled. The item is available in the marketplace again.");
+      setOrder({ ...order, status: "CANCELLED" });
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not cancel this order.");
+    } finally {
+      setCancelling(false);
+    }
   }
 
   if (!ready) return <main className="min-h-dvh px-4 py-8 text-center text-sm text-ink-muted">Loading order…</main>;
   if (!order) return <main className="min-h-dvh px-4 py-8"><h1 className="text-xl font-semibold text-ink">Order not found</h1><p className="mt-2 text-sm text-ink-muted">This order may have been removed or the link may be incorrect.</p><Link href="/orders" className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-full bg-primary px-5 text-sm font-semibold text-white"><ArrowLeft size={16} /> Back to orders</Link></main>;
   const viewOrder = order;
+  const productValue = "subtotal" in viewOrder && typeof viewOrder.subtotal === "number"
+    ? viewOrder.subtotal
+    : viewOrder.productValue;
+  const totalAmount = "totalAmount" in viewOrder && typeof viewOrder.totalAmount === "number"
+    ? viewOrder.totalAmount
+    : viewOrder.moneyPaid;
+  const shippingFee = viewOrder.shippingFee ?? 0;
+  const serviceFee = viewOrder.serviceFee ?? 0;
+  const gpUsed = viewOrder.gpUsed ?? 0;
   const delivery = viewOrder.delivery;
   const routeDates = delivery?.courier ? formatOrderDate(viewOrder.estimatedArrival ?? addDays(new Date(viewOrder.createdAt), delivery.courier.maxDays).toISOString()) : null;
   const detailsTitle = product ? `${product.name} × ${viewOrder.items[0]?.quantity ?? 1}` : `${viewOrder.items.length} item${viewOrder.items.length === 1 ? "" : "s"}`;
@@ -63,6 +93,22 @@ function OrderDetailsContent() {
       <header className="flex items-center gap-3"><Link href="/orders" aria-label="Back to my orders" className="flex size-11 items-center justify-center rounded-full text-ink-muted hover:bg-mint-50"><ArrowLeft size={20} /></Link><div><h1 className="text-[26px] font-bold leading-tight text-ink">Order details</h1><p className="text-xs text-ink-muted">Order {viewOrder.id}</p></div><button type="button" onClick={() => void copyText(viewOrder.id, "Order ID")} aria-label="Copy order ID" className="ml-auto flex size-11 items-center justify-center rounded-full text-primary hover:bg-mint-50"><Copy size={18} /></button></header>
       {notice && <p role="status" aria-live="polite" className="rounded-2xl bg-success/10 p-3 text-sm font-semibold text-success">{notice}</p>}
       {error && <p role="alert" className="rounded-2xl bg-danger/10 p-3 text-xs text-danger">{error}</p>}
+      {viewOrder.status === "PENDING_PAYMENT" && (
+        <section className="rounded-3xl border border-warning/20 bg-warning/5 p-4">
+          <h2 className="text-sm font-bold text-ink">Payment still pending</h2>
+          <p className="mt-1 text-xs leading-relaxed text-ink-muted">
+            Cancel this order if you do not want to continue. The item will be returned to the marketplace.
+          </p>
+          <button
+            type="button"
+            disabled={cancelling}
+            onClick={() => void cancelPendingOrder()}
+            className="mt-3 min-h-11 w-full rounded-full border border-danger px-4 text-xs font-semibold text-danger hover:bg-danger/5 disabled:opacity-60"
+          >
+            {cancelling ? "Cancelling..." : "Cancel order & return to marketplace"}
+          </button>
+        </section>
+      )}
 
       <section className="rounded-3xl bg-white p-4 shadow-card">
         <div className="flex items-start justify-between gap-2">
@@ -103,13 +149,12 @@ function OrderDetailsContent() {
 
       <section className="rounded-3xl bg-white p-4 shadow-card">
         <h2 className="text-base font-semibold text-ink">Payment summary</h2>
-        <SummaryRow label="Product value" value={formatRupiah(viewOrder.productValue)} />
-        <SummaryRow label="Green Points applied" value={formatGP(viewOrder.gpUsed)} positive />
-        <SummaryRow label="Shipping / pickup" value={viewOrder.shippingFee > 0 ? formatRupiah(viewOrder.shippingFee) : "Free pickup"} />
-        <SummaryRow label="Service fee" value={formatRupiah(viewOrder.serviceFee)} />
+        <SummaryRow label="Product value" value={formatRupiah(productValue)} />
+        <SummaryRow label="Green Points applied" value={formatGP(gpUsed)} positive />
+        <SummaryRow label="Shipping / pickup" value={shippingFee > 0 ? formatRupiah(shippingFee) : "Free pickup"} />
+        <SummaryRow label="Service fee" value={formatRupiah(serviceFee)} />
         <div className="my-3 border-t border-border" />
-        <SummaryRow label="Amount (not collected)" value={formatRupiah(viewOrder.moneyPaid)} strong />
-        <p className="mt-3 rounded-xl bg-warning/10 p-3 text-xs text-ink">Prototype record only. Payment, wallet deductions, and rewards are not integrated.</p>
+        <SummaryRow label="Total amount" value={formatRupiah(totalAmount)} strong />
         {delivery?.method === "courier" && delivery.address && <div className="mt-4 border-t border-border pt-3"><p className="text-xs font-semibold text-ink">Delivery address</p><p className="mt-1 text-xs text-ink-muted">{delivery.address.name} · {delivery.address.phone}</p><p className="mt-1 text-xs leading-relaxed text-ink-muted">{delivery.address.address}, {delivery.address.city} {delivery.address.postalCode}</p></div>}
       </section>
 

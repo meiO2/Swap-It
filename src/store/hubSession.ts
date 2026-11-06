@@ -11,12 +11,14 @@ type HubSession = {
   code: string;
   expiresAt: number;
   hubId: string;
+  donationId: string;
   itemCount: number;
   startSession: () => void;
   refreshCode: (ttlSeconds?: number) => void;
   setCodeExpiry: (ttlSeconds: number) => void;
   markScanned: () => void;
   setHubId: (hubId: string) => void;
+  setDonationId: (donationId: string) => void;
   setItemCount: (count: number) => void;
   confirm: () => void;
   reset: () => void;
@@ -27,6 +29,7 @@ const initialSession = {
   code: "",
   expiresAt: 0,
   hubId: "hub-bsd",
+  donationId: "",
   itemCount: 1,
 };
 
@@ -67,6 +70,10 @@ export const useHubSession = create<HubSession>()(
       setHubId: (hubId) => {
         if (!hubId.trim()) throw new RangeError("Choose a valid Swap Hub.");
         set({ hubId });
+      },
+      setDonationId: (donationId) => {
+        if (!donationId.trim()) throw new RangeError("A valid donation session is required.");
+        set({ donationId });
       },
       setItemCount: (count) => {
         if (!Number.isFinite(count)) throw new RangeError("Donation quantity must be a number.");

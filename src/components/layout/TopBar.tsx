@@ -1,5 +1,6 @@
 
 import Link from "next/link";
+import { useCallback, useEffect, useState } from "react";
 import {
   Bell,
   MapPin,
@@ -10,6 +11,30 @@ import {
 } from "lucide-react";
 
 export default function TopBar() {
+  const [cartCount, setCartCount] = useState(0);
+
+  const loadCartCount = useCallback(async () => {
+    try {
+      const response = await fetch("/api/cart", { cache: "no-store" });
+      if (!response.ok) return;
+      const result = await response.json();
+      if (result.success) {
+        setCartCount(result.data?.itemCount ?? result.data?.items?.length ?? 0);
+      }
+    } catch {
+      // The cart badge is optional when the user is not authenticated.
+    }
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(loadCartCount, 0);
+    window.addEventListener("cart-updated", loadCartCount);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("cart-updated", loadCartCount);
+    };
+  }, [loadCartCount]);
+
   return (
     <header className="px-4 pt-5">
       <div className="mb-4 flex items-center justify-between">
@@ -33,9 +58,14 @@ export default function TopBar() {
           <Link
             href="/cart"
             aria-label="View shopping cart"
-            className="rounded-full p-2 text-ink-muted transition hover:bg-mint-50 hover:text-primary"
+            className="relative rounded-full p-2 text-ink-muted transition hover:bg-mint-50 hover:text-primary"
           >
             <ShoppingBag size={21} strokeWidth={1.75} />
+            {cartCount > 0 && (
+              <span className="absolute -right-0.5 -top-0.5 flex min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[9px] font-bold leading-4 text-white">
+                {cartCount > 99 ? "99+" : cartCount}
+              </span>
+            )}
           </Link>
 
           <Link

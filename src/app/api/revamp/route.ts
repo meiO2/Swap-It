@@ -1,11 +1,13 @@
 import { connection, NextResponse } from "next/server";
 import { connectDB } from "@/lib/mongodb";
 import RevampMerchandise from "@/models/RevampMerchandise";
+import { ensureMockDataSeeded } from "@/lib/mock-seed";
 
 export async function GET() {
   await connection();
   try {
     await connectDB();
+    await ensureMockDataSeeded();
     const products = await RevampMerchandise.find({ status: "available" }).sort({ createdAt: -1 }).lean();
     return NextResponse.json({ success: true, data: products });
   } catch (error) {

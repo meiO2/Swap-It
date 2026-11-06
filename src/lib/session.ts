@@ -22,7 +22,7 @@
     const session = await Session.findOne({
         tokenHash,
         expiresAt: { $gt: new Date() },
-    });
+    }).select("+tokenHash");
 
     if (!session) {
         return null;

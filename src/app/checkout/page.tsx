@@ -3,8 +3,8 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   ArrowLeft,
   Check,
@@ -14,14 +14,12 @@ import {
   Truck,
   X,
 } from "lucide-react";
-import { swapHubs } from "@/data/mock";
+import type { SwapHub } from "@/lib/hubs";
 import { couriers, type Courier } from "@/data/couriers";
 import type { IUserAddress } from "@/models/User";
 import { estimateArrival, formatOrderDate } from "@/lib/orders";
 import { formatRupiah } from "@/lib/format";
 import { apiRequest } from "@/lib/api";
-
-const serviceFee = 5000;
 
 interface CartProduct {
   _id: string;
@@ -48,9 +46,21 @@ interface OrderResponse {
   _id?: string;
 }
 
+interface ShippingRate {
+  courier_code: string;
+  courier_name?: string;
+  courier_service_code?: string;
+  courier_service_name?: string;
+  price: number;
+  duration?: string;
+}
+
+interface GreenPointResponse {
+  balance: number;
+}
+
 export default function CheckoutPage() {
   const router = useRouter();
-
   const [items, setItems] = useState<CartItem[]>([]);
   const [cartLoading, setCartLoading] = useState(true);
   const [cartError, setCartError] = useState("");
@@ -67,7 +77,8 @@ export default function CheckoutPage() {
     postalCode: "",
   });
 
-  const [hubId, setHubId] = useState(swapHubs[0].id);
+  const [hubId, setHubId] = useState("");
+  const [swapHubs, setSwapHubs] = useState<SwapHub[]>([]);
   const [addressSheetOpen, setAddressSheetOpen] = useState(false);
   const [addingAddress, setAddingAddress] = useState(false);
   const [newAddress, setNewAddress] = useState({
@@ -84,6 +95,11 @@ export default function CheckoutPage() {
   const [error, setError] = useState("");
   const [placingOrder, setPlacingOrder] = useState(false);
   const [etaStart, setEtaStart] = useState<string | null>(null);
+  const [shippingRates, setShippingRates] = useState<ShippingRate[]>([]);
+  const [shippingLoading, setShippingLoading] = useState(false);
+  const [shippingError, setShippingError] = useState("");
+  const [gpBalance, setGpBalance] = useState(0);
+  const [gpUsed, setGpUsed] = useState(0);
 
   const subtotal = useMemo(
     () =>
@@ -96,6 +112,9 @@ export default function CheckoutPage() {
 
   const courier =
     couriers.find((item) => item.id === courierId) ?? couriers[0];
+  const selectedShippingRate = shippingRates.find(
+    (rate) => rate.courier_code === courierId,
+  );
 
   const hub = swapHubs.find((item) => item.id === hubId);
 
@@ -110,7 +129,8 @@ export default function CheckoutPage() {
             address.phone &&
             address.address &&
             address.city &&
-            courier,
+            courier &&
+            shippingRates.length > 0,
         )
       : Boolean(hub);
 
@@ -122,6 +142,63 @@ export default function CheckoutPage() {
 
     return () => window.clearTimeout(timerId);
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    apiRequest<SwapHub[]>("/api/hubs")
+      .then((hubs) => {
+        if (active) setSwapHubs(hubs);
+      })
+      .catch((cause: unknown) => {
+        if (active) setError(cause instanceof Error ? cause.message : "Could not load Swap Hubs.");
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (method !== "courier" || !address.postalCode || !items.length) {
+      return;
+    }
+    let active = true;
+    const loadingTimer = window.setTimeout(() => setShippingLoading(true), 0);
+    const errorTimer = window.setTimeout(() => setShippingError(""), 0);
+    apiRequest<ShippingRate[]>("/api/shipping/rates", {
+      method: "POST",
+      body: JSON.stringify({ destinationPostalCode: address.postalCode }),
+    })
+      .then((rates) => {
+        if (!active) return;
+        const normalized = Array.isArray(rates) ? rates : [];
+        setShippingRates(normalized);
+        if (normalized.length > 0) setCourierId(normalized[0].courier_code);
+      })
+      .catch((cause: unknown) => {
+        if (active) setShippingError(cause instanceof Error ? cause.message : "Could not load shipping rates.");
+      })
+      .finally(() => {
+        if (active) setShippingLoading(false);
+      });
+    return () => {
+      active = false;
+      window.clearTimeout(loadingTimer);
+      window.clearTimeout(errorTimer);
+    };
+  }, [address.postalCode, items.length, method]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      apiRequest<GreenPointResponse>("/api/green-points")
+        .then((data) => {
+          const balance = Math.max(0, data.balance);
+          setGpBalance(balance);
+          setGpUsed(Math.min(balance, subtotal));
+        })
+        .catch((cause: unknown) => console.error("Could not load Green Point balance.", cause));
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [subtotal]);
 
   // Load the actual MongoDB cart.
   useEffect(() => {
@@ -249,6 +326,9 @@ export default function CheckoutPage() {
         method: "POST",
         body: JSON.stringify({
           deliveryMethod: method,
+          ...(method === "pickup" ? { hubId } : {}),
+          gpUsed,
+          ...(method === "courier" ? { courierCode: courierId } : {}),
 
           ...(method === "courier"
             ? {
@@ -272,13 +352,14 @@ export default function CheckoutPage() {
         );
       }
 
-      // The backend already clears the MongoDB cart.
-      router.push(`/orders/${orderId}?placed=1`);
+      router.push(`/payment?orderId=${orderId}`);
     } catch (cause) {
-      setError(
-        cause instanceof Error
-          ? cause.message
-          : "Checkout could not be completed.",
+      router.push(
+        `/cart?paymentError=${encodeURIComponent(
+          cause instanceof Error
+            ? cause.message
+            : "Checkout could not be completed.",
+        )}`,
       );
     } finally {
       setPlacingOrder(false);
@@ -470,14 +551,25 @@ export default function CheckoutPage() {
                   aria-label="Courier service"
                   className="mt-2 space-y-2"
                 >
-                  {couriers.map((item) => (
+                  {shippingLoading ? <p className="rounded-xl bg-mint-50 p-3 text-xs text-ink-muted">Loading Biteship rates...</p> : shippingError ? <p className="rounded-xl bg-danger/10 p-3 text-xs text-danger">{shippingError}</p> : shippingRates.map((rate) => {
+                    const item: Courier = {
+                      id: rate.courier_code,
+                      name: `${rate.courier_name ?? rate.courier_code.toUpperCase()} ${rate.courier_service_name ?? ""}`.trim(),
+                      badge: (rate.courier_name ?? rate.courier_code).slice(0, 1).toUpperCase(),
+                      fee: rate.price,
+                      minDays: 1,
+                      maxDays: 7,
+                      color: "bg-info/15 text-info",
+                    };
+                    return (
                     <CourierChoice
-                      key={item.id}
+                      key={`${rate.courier_code}-${rate.courier_service_code ?? rate.courier_service_name ?? ""}`}
                       courier={item}
                       selected={courierId === item.id}
                       onClick={() => setCourierId(item.id)}
                     />
-                  ))}
+                    );
+                  })}
                 </div>
               </>
             ) : (
@@ -549,15 +641,27 @@ export default function CheckoutPage() {
               <h2 className="text-base font-semibold text-ink">
                 Green Points
               </h2>
-              <span className="text-xs text-ink-muted">
-                Unavailable at checkout
+              <span className="text-sm font-semibold text-primary">
+                {gpUsed.toLocaleString("id-ID")} GP
               </span>
             </div>
-
+            <input
+              type="range"
+              min={0}
+              max={Math.min(gpBalance, subtotal)}
+              step={1}
+              value={gpUsed}
+              onChange={(event) => setGpUsed(Number(event.target.value))}
+              aria-label="Green Points to use"
+              className="mt-4 h-2 w-full cursor-pointer accent-primary"
+            />
+            <div className="mt-1 flex justify-between text-[10px] text-ink-muted">
+              <span>0 GP</span>
+              <span>{Math.min(gpBalance, subtotal).toLocaleString("id-ID")} GP available</span>
+            </div>
             <p className="mt-2 text-xs leading-relaxed text-ink-muted">
-              Wallet balances are currently local demo data and are not
-              deducted by the backend. Green Points cannot be applied
-              until a wallet API is available.
+              Choose how many Green Points to use. Shipping cannot be paid
+              with GP.
             </p>
           </section>
 
@@ -568,37 +672,61 @@ export default function CheckoutPage() {
             </h2>
 
             <p className="mb-3 rounded-xl bg-warning/10 p-3 text-xs leading-relaxed text-ink">
-              Prototype checkout only: this creates an order record but
-              does not collect payment. The current backend records the
-              product subtotal and does not yet apply courier or service
-              fees.
+              Shipping rates are calculated by Biteship using the selected
+              destination and courier. The backend recalculates the rate
+              before creating the order.
             </p>
 
             <BreakdownRow
-              label="Product subtotal"
+              label="Product value"
               amount={subtotal}
             />
 
             <BreakdownRow
-              label="Courier selection"
+              label="Delivery"
               value={
                 method === "courier"
-                  ? courier.name
-                  : "Swap Hub pickup"
+                  ? `${selectedShippingRate?.courier_name ?? courier.name} to ${address.city || "your address"}`
+                  : `Pickup at ${hub?.name ?? "Swap Hub"}`
               }
+            />
+
+            <BreakdownRow
+              label="Green Points applied"
+              value={`${gpUsed.toLocaleString("id-ID")} GP`}
+            />
+
+            <BreakdownRow
+              label="Shipping fee"
+              value={
+                method === "pickup"
+                  ? "Free pickup"
+                  : formatRupiah(selectedShippingRate?.price ?? 0)
+              }
+            />
+
+            <BreakdownRow
+              label="Service fee (prototype)"
+              amount={0}
             />
 
             <div className="my-3 border-t border-border" />
 
             <div className="flex justify-between text-sm font-semibold text-ink">
-              <span>Order total recorded by backend</span>
-              <span>{formatRupiah(subtotal)}</span>
+              <span>Pay now in money</span>
+              <span>
+                {formatRupiah(
+                  Math.max(
+                    0,
+                    subtotal +
+                      (method === "courier"
+                        ? (selectedShippingRate?.price ?? 0)
+                        : 0) -
+                      gpUsed,
+                  ),
+                )}
+              </span>
             </div>
-
-            <p className="mt-3 text-xs text-ink-muted">
-              Green Point rewards are not issued because no wallet
-              integration is available.
-            </p>
           </section>
 
           {!methodValid && (

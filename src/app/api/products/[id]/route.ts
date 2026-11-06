@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import { connectDB } from "@/lib/mongodb";
 import { requireAuth } from "@/lib/authorization";
 import Product from "@/models/Product";
+import { ensureMockDataSeeded } from "@/lib/mock-seed";
 import {
   isProductOwner,
   parseProductInput,
@@ -55,15 +56,10 @@ export async function GET(
   try {
     await connectDB();
     const { id } = await params;
-    if (!validateId(id)) {
-      return NextResponse.json(
-        { success: false, message: "Invalid product ID." },
-        { status: 400 },
-      );
-    }
+    await ensureMockDataSeeded();
 
     const product = await Product.findOne({
-      _id: id,
+      ...(validateId(id) ? { _id: id } : { mockId: id }),
       status: "AVAILABLE",
     })
       .populate("sellerId", "name")

@@ -3,12 +3,13 @@
   import Link from "next/link";
   import { useState, type ReactNode } from "react";
   import { usePathname, useRouter } from "next/navigation";
-  import { LayoutDashboard, Menu, Newspaper, PackageCheck, ShieldCheck, X } from "lucide-react";
+  import { Gift, LayoutDashboard, Menu, Newspaper, PackageCheck, ShieldCheck, X } from "lucide-react";
   import { useAuth, type AuthUser } from "@/components/auth/AuthProvider";
 
   const links = [
     { href: "/admin", label: "Overview", Icon: LayoutDashboard, adminOnly: false },
     { href: "/admin/qc", label: "Quality Control", Icon: ShieldCheck, adminOnly: false },
+    { href: "/admin/donations", label: "Donation GP", Icon: Gift, adminOnly: false },
     { href: "/admin/revamp", label: "Revamp! Merchandise", Icon: PackageCheck, adminOnly: true },
     { href: "/admin/news", label: "News", Icon: Newspaper, adminOnly: true },
   ];

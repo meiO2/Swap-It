@@ -1,10 +1,11 @@
 
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Camera, CircleHelp } from "lucide-react";
-import { FormEvent, useEffect, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useState } from "react";
 import { apiRequest } from "@/lib/api";
 import type { IUserAddress } from "@/models/User";
 
@@ -19,6 +20,19 @@ export default function SellPage() {
   const [submitting, setSubmitting] = useState(false);
   const [addresses, setAddresses] = useState<IUserAddress[]>([]);
   const [addressId, setAddressId] = useState("");
+  const [imagePreviews, setImagePreviews] = useState<string[]>([]);
+
+  useEffect(() => {
+    return () => {
+      imagePreviews.forEach((preview) => URL.revokeObjectURL(preview));
+    };
+  }, [imagePreviews]);
+
+  function handleImageChange(event: ChangeEvent<HTMLInputElement>) {
+    imagePreviews.forEach((preview) => URL.revokeObjectURL(preview));
+    const files = Array.from(event.target.files ?? []).slice(0, 8);
+    setImagePreviews(files.map((file) => URL.createObjectURL(file)));
+  }
 
   useEffect(() => {
     apiRequest<IUserAddress[]>("/api/profile/addresses")
@@ -50,6 +64,9 @@ export default function SellPage() {
 
     const price = Number(formData.get("price"));
     const image = String(formData.get("image") ?? "").trim();
+    const imageFiles = formData
+      .getAll("images")
+      .filter((entry): entry is File => entry instanceof File && entry.size > 0);
 
     const pickupDate = String(
       formData.get("pickupDate") ?? "",
@@ -83,6 +100,16 @@ export default function SellPage() {
     setError("");
 
     try {
+      let images = image ? [image] : [];
+      if (imageFiles.length > 0) {
+        const uploadData = new FormData();
+        imageFiles.forEach((file) => uploadData.append("images", file));
+        images = await apiRequest<string[]>("/api/uploads", {
+          method: "POST",
+          body: uploadData,
+        });
+      }
+
       await apiRequest("/api/products", {
         method: "POST",
         body: JSON.stringify({
@@ -92,7 +119,7 @@ export default function SellPage() {
           size: String(formData.get("size") ?? ""),
           condition: String(formData.get("condition") ?? ""),
           price,
-          images: image ? [image] : [],
+          images: images.length > 0 ? images : undefined,
           fulfillment,
           pickupDate:
             fulfillment === "Pickup" ? pickupDate : undefined,
@@ -115,17 +142,17 @@ export default function SellPage() {
   }
 
   return (
-    <main className="px-4 pb-6 pt-5">
-      <header className="mb-5 flex items-center gap-3">
+    <main className="mx-auto w-full max-w-[520px] px-4 pb-6 pt-5">
+      <header className="relative mb-5 flex items-center justify-center">
         <Link
           href="/"
           aria-label="Back home"
-          className="rounded-full p-2 text-ink-muted hover:bg-mint-50"
+          className="absolute left-0 rounded-full p-2 text-ink-muted hover:bg-mint-50"
         >
           <ArrowLeft size={20} />
         </Link>
 
-        <div>
+        <div className="text-center">
           <h1 className="text-xl font-semibold text-ink">
             Sell a piece
           </h1>
@@ -135,14 +162,47 @@ export default function SellPage() {
         </div>
       </header>
 
-      <form onSubmit={submitProduct} className="space-y-4">
-        <div className="flex items-start gap-2 rounded-xl bg-mint-50 p-3 text-xs text-ink-muted">
+      <form onSubmit={submitProduct} className="mx-auto w-full space-y-4">
+        <div className="flex items-center justify-center gap-2 rounded-xl bg-mint-50 p-3 text-center text-xs text-ink-muted">
           <Camera size={17} className="shrink-0 text-primary" />
           <span>
-            Image upload is not connected yet. You can optionally add
-            a public image URL.
+            Upload up to 8 product images, or optionally add a public image URL.
           </span>
         </div>
+
+        <Field label="Product images (optional)">
+          <div className="relative flex h-12 w-full items-center justify-center overflow-hidden rounded-xl border border-border bg-white text-center text-xs text-ink-muted">
+            <span className="pointer-events-none">
+              {imagePreviews.length > 0
+                ? `${imagePreviews.length} image${imagePreviews.length === 1 ? "" : "s"} selected`
+                : "Choose files"}
+            </span>
+            <input
+              name="images"
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              multiple
+              onChange={handleImageChange}
+              className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+            />
+          </div>
+          {imagePreviews.length > 0 && (
+            <div className="mt-3 grid grid-cols-4 gap-2">
+              {imagePreviews.map((preview, index) => (
+                <div key={preview} className="relative aspect-square overflow-hidden rounded-xl bg-mint-50">
+                  <Image
+                    src={preview}
+                    alt={`Selected product image ${index + 1}`}
+                    fill
+                    unoptimized
+                    sizes="25vw"
+                    className="object-cover"
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+        </Field>
 
         <Field label="Product image URL (optional)">
           <input
@@ -171,7 +231,7 @@ export default function SellPage() {
             maxLength={2000}
             rows={4}
             placeholder="Describe your item, its details, and anything buyers should know..."
-            className="form-input"
+            className="form-input w-full resize-none text-left"
           />
         </Field>
 

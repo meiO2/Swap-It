@@ -1,11 +1,14 @@
-import { couriers } from "@/data/couriers";
-import { savedAddresses } from "@/data/addresses";
-import { swapHubs } from "@/data/mock";
-
-export const SHOW_DEMO_CONTROLS = true;
-
 export type DeliveryMethod = "courier" | "pickup";
 export type OrderStatus =
+  | "PENDING_PAYMENT"
+  | "PAID"
+  | "PROCESSING"
+  | "SHIPPED"
+  | "DELIVERED"
+  | "COMPLETED"
+  | "CANCELLED"
+  | "EXPIRED"
+  | "REFUNDED"
   | "Processing"
   | "Shipped"
   | "On the way"
@@ -31,6 +34,9 @@ export type OrderDelivery = {
 export type OrderShape = {
   id: string;
   items: Array<{ productId: string; productValue: number; quantity: number }>;
+  subtotal?: number;
+  totalAmount?: number;
+  deliveryMethod?: DeliveryMethod;
   productValue: number;
   shippingFee: number;
   serviceFee: number;
@@ -140,67 +146,6 @@ export function getCurrentTimelineIndex(order: OrderShape) {
   if (order.status === "Delivered" || order.status === "Completed") return order.delivery?.method === "pickup" ? 3 : 5;
   if (order.status === "Picked up") return 3;
   return -1;
-}
-
-function entryIndexForStatus(order: Pick<OrderShape, "delivery" | "status">, status: OrderStatus) {
-  if (order.delivery?.method === "pickup") {
-    return status === "Ready for pickup" ? 2 : status === "Picked up" || status === "Completed" ? 3 : 1;
-  }
-  const indices: Partial<Record<OrderStatus, number>> = {
-    Processing: 1, "QC review": 1, "Not eligible": 1, Shipped: 2, "On the way": 3,
-    "Out for delivery": 4, Delivered: 5, Completed: 5,
-  };
-  return indices[status] ?? 1;
-}
-
-export function createDemoOrders(): OrderShape[] {
-  const courier = couriers[0];
-  const address = savedAddresses[0];
-  const hub = swapHubs[0];
-  const make = (
-    id: string,
-    createdAt: string,
-    status: OrderStatus,
-    method: DeliveryMethod,
-    options: { qcStatus?: OrderShape["qcStatus"]; progress?: number; decisionDays?: number; estimatedArrival?: string } = {},
-  ): OrderShape => {
-    const delivery: OrderDelivery = method === "courier"
-      ? { method, courier, address, trackingNumber: `SCP${id}ID` }
-      : { method, hub, pickupCode: `SWP-PICK-${id}` };
-    const pointValue = 210000;
-    const shippingFee = method === "courier" ? courier.fee : 0;
-    const index = entryIndexForStatus({ delivery, status }, status);
-    const timeline = buildTimeline(method, createdAt, index);
-    const events: OrderTrackingEvent[] = timeline.filter((item) => item.at).map((item, i) => ({
-      id: `${id}-event-${i}`,
-      at: item.at!,
-      title: item.label,
-      location: i < 2 ? hub.name : method === "pickup" ? hub.address : "Tangerang sorting center",
-    }));
-    const routeEstimate = estimateArrival(createdAt, courier.minDays, courier.maxDays);
-    return {
-      id, items: [{ productId: "denim-jacket", productValue: pointValue, quantity: 1 }],
-      productValue: pointValue, shippingFee, serviceFee: 5000, gpUsed: 20000,
-      moneyPaid: pointValue - 20000 + shippingFee + 5000, status, createdAt,
-      rewardGranted: status === "Delivered" || status === "Picked up" || status === "Completed",
-      delivery, timeline, trackingEvents: events,
-      progress: options.progress ?? Math.min(1, Math.max(0, index / (method === "courier" ? 5 : 3))),
-      estimatedArrival: options.estimatedArrival ?? routeEstimate.to,
-      pickupDeadline: dateOnly(addDays(new Date(createdAt), 7)),
-      qcStatus: options.qcStatus ?? (status === "Processing" ? "pending" : "passed"),
-      qcDecisionDeadline: options.decisionDays ? addDays(new Date(createdAt), options.decisionDays).toISOString() : undefined,
-      rewardEligible: true,
-    };
-  };
-  return [
-    make("031430", "2026-10-29T08:24:00.000Z", "On the way", "courier", { progress: 0.62, estimatedArrival: "2026-10-30" }),
-    make("031429", "2026-10-30T00:15:00.000Z", "Processing", "courier", { qcStatus: "pending" }),
-    make("031428", "2026-10-28T07:10:00.000Z", "Ready for pickup", "pickup"),
-    make("031427", "2026-10-25T02:20:00.000Z", "Delivered", "courier", { progress: 1 }),
-    make("031426", "2026-10-24T05:30:00.000Z", "Picked up", "pickup", { progress: 1 }),
-    make("031425", "2026-10-22T11:00:00.000Z", "Cancelled", "courier"),
-    make("031424", "2026-10-29T09:00:00.000Z", "QC review", "pickup", { qcStatus: "rejected", decisionDays: 3 }),
-  ];
 }
 
 export function createTrackingEvent(order: OrderShape, title: string, at = new Date()) {

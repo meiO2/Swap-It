@@ -6,16 +6,36 @@ import { useEffect, useState } from "react";
 import { getAvailablePointBalance, getExpiringBatches } from "@/lib/gp";
 import { formatGP, formatShortDate } from "@/lib/format";
 import { useSwapStore } from "@/store/useSwapStore";
+import { apiRequest } from "@/lib/api";
+
+type LedgerEntry = {
+  _id: string;
+  type: string;
+  amount: number;
+  description: string;
+  expiresAt?: string;
+  createdAt: string;
+};
 
 export default function WalletPage() {
   const batches = useSwapStore((state) => state.pointBatches);
   const transactions = useSwapStore((state) => state.transactions);
   const [now, setNow] = useState<number | null>(null);
+  const [ledgerBalance, setLedgerBalance] = useState<number | null>(null);
+  const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([]);
   useEffect(() => {
     const timerId = window.setTimeout(() => setNow(Date.now()), 0);
     return () => window.clearTimeout(timerId);
   }, []);
-  const balance = now === null ? batches.reduce((total, batch) => total + batch.remaining, 0) : getAvailablePointBalance(batches, new Date(now));
+  useEffect(() => {
+    apiRequest<{ balance: number; entries: LedgerEntry[] }>("/api/green-points")
+      .then((data) => {
+        setLedgerBalance(data.balance);
+        setLedgerEntries(data.entries);
+      })
+      .catch((reason: unknown) => console.error("Could not load Green Point ledger.", reason));
+  }, []);
+  const balance = ledgerBalance ?? (now === null ? batches.reduce((total, batch) => total + batch.remaining, 0) : getAvailablePointBalance(batches, new Date(now)));
   const within7Days = now ? getExpiringBatches(batches, 7, new Date(now)) : [];
   const within30Days = now ? getExpiringBatches(batches, 30, new Date(now)) : [];
 
@@ -36,7 +56,12 @@ export default function WalletPage() {
       <section>
         <div className="mb-3 flex items-center justify-between"><h2 className="text-base font-semibold text-ink">Point batches</h2><span className="text-[10px] text-ink-muted">FEFO spending</span></div>
         <div className="space-y-2">
-          {[...batches].sort((a, b) => Date.parse(a.expiresAt) - Date.parse(b.expiresAt)).map((batch) => (
+          {ledgerBalance !== null ? ledgerEntries.map((entry) => (
+            <article key={entry._id} className="flex items-center justify-between rounded-2xl bg-white p-3 shadow-card">
+              <div><p className="text-xs font-semibold text-ink">{formatGP(entry.amount)}</p><p className="mt-1 flex items-center gap-1 text-[10px] text-ink-muted"><Clock3 size={11} /> {entry.description}</p></div>
+              <span className="rounded-full bg-mint-50 px-2 py-1 text-[10px] text-primary">{entry.expiresAt ? `Expires ${formatShortDate(entry.expiresAt)}` : entry.type}</span>
+            </article>
+          )) : [...batches].sort((a, b) => Date.parse(a.expiresAt) - Date.parse(b.expiresAt)).map((batch) => (
             <article key={batch.id} className="flex items-center justify-between rounded-2xl bg-white p-3 shadow-card">
               <div><p className="text-xs font-semibold text-ink">{formatGP(batch.remaining)}</p><p className="mt-1 flex items-center gap-1 text-[10px] text-ink-muted"><Clock3 size={11} /> Expires {formatShortDate(batch.expiresAt)}</p></div>
               <span className={`rounded-full px-2 py-1 text-[10px] ${now !== null && Date.parse(batch.expiresAt) <= now ? "bg-danger/10 text-danger" : "bg-mint-50 text-primary"}`}>{now !== null && Date.parse(batch.expiresAt) <= now ? "Expired" : `Earned ${formatShortDate(batch.earnedAt)}`}</span>

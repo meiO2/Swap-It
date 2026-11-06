@@ -12,6 +12,10 @@ import Order, {
   type IOrderItem,
 } from "@/models/Order";
 import Product from "@/models/Product";
+import { getBiteshipCourierCode } from "@/lib/biteship";
+import { getShippingRates, ShippingRequestError } from "@/lib/shipping";
+import { getSwapHubs } from "@/lib/hubs";
+import { getGreenPointBalance, redeemGreenPoints } from "@/lib/green-points";
 
 const PAYMENT_EXPIRY_MINUTES = 30;
 
@@ -45,7 +49,17 @@ export async function GET() {
       .sort({ createdAt: -1 })
       .lean();
 
-    return NextResponse.json({ success: true, data: orders });
+    const serializedOrders = orders.map((order) => ({
+      ...order,
+      id: order._id.toString(),
+      items: order.items.map((item) => ({
+        ...item,
+        productId: item.productId.toString(),
+        sellerId: item.sellerId.toString(),
+      })),
+    }));
+
+    return NextResponse.json({ success: true, data: serializedOrders });
   } catch (error) {
     console.error("Get orders error:", error);
 
@@ -262,6 +276,8 @@ export async function POST(request: NextRequest) {
       "Products changed availability during checkout.",
     ].includes(message)
       ? 409
+      : error instanceof ShippingRequestError
+        ? 400
       : 500;
 
     console.error("Create order error:", error);

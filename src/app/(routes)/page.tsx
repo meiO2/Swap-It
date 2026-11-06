@@ -1,11 +1,29 @@
+"use client";
+
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowRight, Heart, Leaf, Sparkles } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ArrowRight, Heart, Leaf, PackageCheck, Sparkles } from "lucide-react";
 import TopBar from "@/components/layout/TopBar";
 import ProductCard from "@/components/ui/ProductCard";
-import { products } from "@/data/mock";
+import type { Product } from "@/data/mock";
+import { mapApiProduct, type ApiProduct } from "@/lib/products";
 
 export default function HomePage() {
+  const [products, setProducts] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch("/api/products?limit=6")
+      .then(async (response) => {
+        const result = await response.json() as { success: boolean; data?: ApiProduct[] };
+        if (!response.ok || !result.success) throw new Error("Failed to load products.");
+        setProducts((result.data ?? []).map(mapApiProduct));
+      })
+      .catch((error) => console.error("Home products error:", error))
+      .finally(() => setLoading(false));
+  }, []);
+
   return (
     <main>
       <TopBar />
@@ -42,8 +60,23 @@ export default function HomePage() {
           <Link href="/products" className="mb-0.5 text-xs font-semibold text-primary">See all</Link>
         </div>
         <div className="grid grid-cols-2 gap-3">
-          {products.map((product, index) => <ProductCard key={product.id} product={product} priority={index === 0} />)}
+          {loading ? <p className="col-span-2 py-8 text-center text-sm text-ink-muted">Loading products...</p> : products.length > 0 ? products.map((product, index) => <ProductCard key={product.id} product={product} priority={index === 0} />) : (
+            <p className="col-span-2 rounded-2xl bg-mint-50 p-5 text-center text-sm text-ink-muted">No products are available yet.</p>
+          )}
         </div>
+      </section>
+
+      <section className="px-4 pt-7">
+        <Link href="/revamp/shop" className="group flex items-center gap-3 rounded-2xl bg-primary p-4 text-white shadow-primary transition hover:bg-primary-dark">
+          <span className="flex size-11 shrink-0 items-center justify-center rounded-full bg-white/15">
+            <PackageCheck size={21} />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-xs font-medium text-white/80">Give textiles a new life</span>
+            <span className="mt-0.5 block text-base font-semibold">Shop Revamp! merchandise</span>
+          </span>
+          <ArrowRight size={18} className="shrink-0 transition group-hover:translate-x-1" />
+        </Link>
       </section>
 
       <section className="px-4 pb-6 pt-7">

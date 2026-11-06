@@ -7,6 +7,7 @@ import { Check, Clock3, Phone, RefreshCw, ScanLine } from "lucide-react";
 import { HubStepGuard, HubLocationCard, HubPicker } from "@/components/hub/hub-ui";
 import { useHubSession } from "@/store/hubSession";
 import { QR_TTL_SECONDS } from "@/lib/hub";
+import { apiRequest } from "@/lib/api";
 
 function QrContent() {
   const router = useRouter();
@@ -18,6 +19,8 @@ function QrContent() {
   const hubId = useHubSession((state) => state.hubId);
   const refreshCode = useHubSession((state) => state.refreshCode);
   const setCodeExpiry = useHubSession((state) => state.setCodeExpiry);
+  const donationId = useHubSession((state) => state.donationId);
+  const setDonationId = useHubSession((state) => state.setDonationId);
   const markScanned = useHubSession((state) => state.markScanned);
   const [now, setNow] = useState<number | null>(null);
   const [isHubPickerOpen, setIsHubPickerOpen] = useState(false);
@@ -38,6 +41,24 @@ function QrContent() {
     appliedDevTtl.current = true;
     setCodeExpiry(ttl);
   }, [code, setCodeExpiry, ttl]);
+
+  useEffect(() => {
+    if (!hubId || donationId) return;
+    let active = true;
+    apiRequest<{ _id: string }>("/api/donations", {
+      method: "POST",
+      body: JSON.stringify({ hubId }),
+    })
+      .then((donation) => {
+        if (active) setDonationId(donation._id);
+      })
+      .catch((reason: unknown) => {
+        if (active) setActionError(reason instanceof Error ? reason.message : "Could not create donation session.");
+      });
+    return () => {
+      active = false;
+    };
+  }, [donationId, hubId, setDonationId]);
 
   const remaining = now === null ? QR_TTL_SECONDS : Math.max(0, Math.ceil((expiresAt - now) / 1000));
   const isExpired = now !== null && remaining === 0;

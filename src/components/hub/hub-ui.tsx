@@ -6,10 +6,35 @@ import { useRouter } from "next/navigation";
 import { MapPin } from "lucide-react";
 import { useHubSession } from "@/store/hubSession";
 import { useSwapStore } from "@/store/useSwapStore";
-import { swapHubs } from "@/data/mock";
+import type { SwapHub } from "@/lib/hubs";
+import { apiRequest } from "@/lib/api";
 
 export const hubPrimaryButton = "flex min-h-12 w-full items-center justify-center gap-2 rounded-full bg-hub-primary px-5 text-sm font-semibold text-white shadow-primary transition hover:bg-hub-primary-dark disabled:pointer-events-none disabled:opacity-45 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-hub-primary";
 export const hubSecondaryButton = "flex min-h-12 w-full items-center justify-center gap-2 rounded-full border border-hub-primary bg-white px-5 text-sm font-semibold text-hub-primary transition hover:bg-hub-mint focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-hub-primary";
+
+export function useSwapHubs() {
+  const [hubs, setHubs] = useState<SwapHub[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    apiRequest<SwapHub[]>("/api/hubs")
+      .then((data) => {
+        if (active) setHubs(data);
+      })
+      .catch((reason: unknown) => {
+        console.error("Could not load Swap Hubs.", reason);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  return { hubs, loading };
+}
 
 export function useHubHydration() {
   const [ready, setReady] = useState(false);
@@ -82,7 +107,11 @@ export function HubStepGuard({ step, children }: { step: "qr" | "insert" | "conf
 }
 
 export function HubLocationCard({ hubId, onClick }: { hubId: string; onClick?: () => void }) {
+  const { hubs, loading } = useSwapHubs();
+  const swapHubs = hubs;
   const hub = swapHubs.find((item) => item.id === hubId) ?? swapHubs[0];
+  if (loading) return <p className="rounded-2xl bg-hub-mint p-3 text-xs text-hub-muted">Loading Swap Hubs…</p>;
+  if (!hub) return <p className="rounded-2xl bg-hub-mint p-3 text-xs text-hub-muted">No Swap Hub is configured yet.</p>;
   const contents = (
     <>
       <span className="flex size-11 shrink-0 items-center justify-center rounded-full bg-hub-mint text-hub-primary">
@@ -106,6 +135,7 @@ export function HubLocationCard({ hubId, onClick }: { hubId: string; onClick?: (
 }
 
 export function HubPicker({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { hubs } = useSwapHubs();
   const selectedHubId = useHubSession((state) => state.hubId);
   const setHubId = useHubSession((state) => state.setHubId);
   if (!open) return null;
@@ -117,7 +147,7 @@ export function HubPicker({ open, onClose }: { open: boolean; onClose: () => voi
           <button type="button" onClick={onClose} aria-label="Close Hub picker" className="flex size-11 items-center justify-center rounded-full text-hub-muted focus-visible:outline-2 focus-visible:outline-hub-primary">×</button>
         </div>
         <div className="space-y-2">
-          {swapHubs.map((hub) => (
+          {hubs.map((hub) => (
             <button key={hub.id} type="button" onClick={() => { setHubId(hub.id); onClose(); }} aria-pressed={selectedHubId === hub.id} className={`flex min-h-14 w-full items-center justify-between rounded-2xl border p-3 text-left ${selectedHubId === hub.id ? "border-hub-primary bg-hub-mint" : "border-border bg-white"}`}>
               <span><span className="block text-sm font-semibold">{hub.name}</span><span className="block text-xs text-hub-muted">{hub.address} · {hub.distance}</span></span>
               {selectedHubId === hub.id && <span className="text-sm font-bold text-hub-primary" aria-hidden="true">✓</span>}

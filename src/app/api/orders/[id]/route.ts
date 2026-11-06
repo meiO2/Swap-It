@@ -32,7 +32,18 @@ export async function GET(
         { status: 404 },
       );
     }
-    return NextResponse.json({ success: true, data: order });
+    return NextResponse.json({
+      success: true,
+      data: {
+        ...order,
+        id: order._id.toString(),
+        items: order.items.map((item) => ({
+          ...item,
+          productId: item.productId.toString(),
+          sellerId: item.sellerId.toString(),
+        })),
+      },
+    });
   } catch (error) {
     console.error("Get order error:", error);
     return NextResponse.json(

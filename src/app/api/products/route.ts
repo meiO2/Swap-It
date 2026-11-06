@@ -4,6 +4,7 @@ import mongoose from "mongoose";
 import { connectDB } from "@/lib/mongodb";
 import { requireAuth } from "@/lib/authorization";
 import Product from "@/models/Product";
+import { ensureMockDataSeeded } from "@/lib/mock-seed";
 import User from "@/models/User";
 import {
   PRODUCT_CONDITIONS,
@@ -24,6 +25,7 @@ function escapeRegex(value: string) {
 export async function GET(request: NextRequest) {
   try {
     await connectDB();
+    await ensureMockDataSeeded();
 
     const { searchParams } = new URL(request.url);
 
