@@ -32,6 +32,19 @@ export type HandoverStatus =
   | "RECEIVED"
   | "CANCELLED";
 
+
+export type ItemQCStatus =
+  | "NOT_STARTED"
+  | "PENDING"
+  | "PASSED"
+  | "FAILED_AWAITING_BUYER"
+  | "BUYER_ACCEPTED"
+  | "BUYER_REJECTED"
+  | "EXPIRED";
+
+export type BuyerQCDecision = "ACCEPT" | "REJECT";
+
+
 export interface IOrderHandover {
   method: HandoverMethod;
   status: HandoverStatus;
@@ -52,6 +65,7 @@ export interface IOrderHandover {
   receivedBy?: mongoose.Types.ObjectId;
 }
 
+
 export interface IOrderItem {
   productId: mongoose.Types.ObjectId;
   sellerId: mongoose.Types.ObjectId;
@@ -59,7 +73,17 @@ export interface IOrderItem {
   price: number;
   image?: string;
   handover?: IOrderHandover;
+
+  // Quality control
+  qcStatus?: ItemQCStatus;
+  qcAssessmentId?: mongoose.Types.ObjectId;
+  qcDecisionDeadline?: Date;
+
+  // Buyer's decision after failed QC
+  buyerQcDecision?: BuyerQCDecision;
+  buyerQcDecisionAt?: Date;
 }
+
 
 export interface IOrder {
   buyerId: mongoose.Types.ObjectId;
@@ -137,6 +161,39 @@ const OrderItemSchema = new Schema<IOrderItem>(
     price: { type: Number, required: true, min: 1 },
     image: { type: String },
     handover: { type: HandoverSchema },
+        
+    qcStatus: {
+      type: String,
+      enum: [
+        "NOT_STARTED",
+        "PENDING",
+        "PASSED",
+        "FAILED_AWAITING_BUYER",
+        "BUYER_ACCEPTED",
+        "BUYER_REJECTED",
+        "EXPIRED",
+      ],
+      default: "NOT_STARTED",
+    },
+
+    qcAssessmentId: {
+      type: Schema.Types.ObjectId,
+      ref: "QCAssessment",
+    },
+
+    qcDecisionDeadline: {
+      type: Date,
+    },
+
+    buyerQcDecision: {
+      type: String,
+      enum: ["ACCEPT", "REJECT"],
+    },
+
+    buyerQcDecisionAt: {
+      type: Date,
+    },
+
   },
   { _id: false },
 );
