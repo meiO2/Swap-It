@@ -6,6 +6,7 @@
     import PendingRegistration from "@/models/PendingRegistration";
 
     import { verifyAndConsumeOTP } from "@/lib/auth/otp-service";
+    import { awardGreenPoints } from "@/lib/green-points";
 
     export async function POST(request: NextRequest) {
     try {
@@ -102,6 +103,12 @@
         role: "CUSTOMER",
         isActive: true,
         emailVerifiedAt: new Date(),
+        });
+        await awardGreenPoints({
+            userId: user._id.toString(),
+            amount: 2000,
+            description: "Account registration reward",
+            referenceKey: `registration:${user._id.toString()}`,
         });
 
         // Remove temporary registration data.

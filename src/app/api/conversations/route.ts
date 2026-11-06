@@ -6,6 +6,7 @@
     import { getCurrentUser } from "@/lib/session";
     import Conversation from "@/models/Conversation";
     import User from "@/models/User";
+    import { ensureMockConversationsSeeded } from "@/lib/mock-seed";
 
     // GET: Retrieve all conversations belonging to the logged-in user.
     export async function GET() {
@@ -21,6 +22,7 @@
         );
         }
 
+        await ensureMockConversationsSeeded(currentUser.id);
         const conversations = await Conversation.find({
         participants: new Types.ObjectId(currentUser.id),
         })

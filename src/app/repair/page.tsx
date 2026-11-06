@@ -1,9 +1,21 @@
 import Image from "next/image";
 import Link from "next/link";
 import { ArrowLeft, ArrowRight, MapPin, Star } from "lucide-react";
-import { repairShops } from "@/data/mock";
+import { useEffect, useState } from "react";
+import { apiRequest } from "@/lib/api";
+import type { RepairShop } from "@/data/mock";
 
 export default function RepairPage() {
+  const [repairShops, setRepairShops] = useState<RepairShop[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    apiRequest<RepairShop[]>("/api/repair-shops")
+      .then(setRepairShops)
+      .catch((error: unknown) => console.error("Repair shops error:", error))
+      .finally(() => setLoading(false));
+  }, []);
+
   return (
     <main className="px-4 pb-6 pt-5">
       <header className="mb-4 flex items-center gap-3">
@@ -33,7 +45,7 @@ export default function RepairPage() {
           <Link href="/map" className="text-xs font-semibold text-primary">Map view</Link>
         </div>
         <div className="space-y-3">
-          {repairShops.map((shop) => (
+          {loading ? <p className="rounded-2xl bg-mint-50 p-5 text-center text-sm text-ink-muted">Loading repair shops...</p> : repairShops.length > 0 ? repairShops.map((shop) => (
             <article key={shop.id} className="flex gap-3 rounded-2xl bg-white p-3 shadow-card">
               <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-xl bg-mint-50">
                 <Image src={shop.image} alt="" fill sizes="96px" className="object-cover" />
@@ -48,7 +60,7 @@ export default function RepairPage() {
                 <button type="button" className="mt-2 text-xs font-semibold text-primary hover:text-primary-dark">View details</button>
               </div>
             </article>
-          ))}
+          )) : <p className="rounded-2xl bg-mint-50 p-5 text-center text-sm text-ink-muted">No repair shops are available yet.</p>}
         </div>
       </section>
     </main>

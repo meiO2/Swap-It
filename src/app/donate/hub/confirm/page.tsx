@@ -3,9 +3,8 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { CalendarDays, Clock3, Info, Leaf, MapPin, Shirt } from "lucide-react";
-import { HubStepGuard, StickyActions, SummaryRow, hubPrimaryButton, hubSecondaryButton } from "@/components/hub/hub-ui";
+import { HubStepGuard, StickyActions, SummaryRow, hubPrimaryButton, hubSecondaryButton, useSwapHubs } from "@/components/hub/hub-ui";
 import { useHubSession } from "@/store/hubSession";
-import { swapHubs } from "@/data/mock";
 import { formatGP } from "@/lib/format";
 import { GP_PER_ITEM, getExpiryDate } from "@/lib/hub";
 
@@ -16,7 +15,8 @@ function ConfirmContent() {
   const confirm = useHubSession((state) => state.confirm);
   const [currentTime, setCurrentTime] = useState<number | null>(null);
   const [error, setError] = useState("");
-  const hub = swapHubs.find((item) => item.id === hubId) ?? swapHubs[0];
+  const { hubs, loading } = useSwapHubs();
+  const hub = hubs.find((item) => item.id === hubId) ?? hubs[0];
   const amount = itemCount * GP_PER_ITEM;
   const currentDate = currentTime === null ? null : new Date(currentTime);
   const dateTime = currentDate
@@ -30,6 +30,9 @@ function ConfirmContent() {
     const timerId = window.setTimeout(() => setCurrentTime(Date.now()), 0);
     return () => window.clearTimeout(timerId);
   }, []);
+
+  if (loading) return <p className="p-6 text-sm text-hub-muted">Loading Swap Hubs…</p>;
+  if (!hub) return <p className="p-6 text-sm text-hub-muted">No Swap Hub is configured yet.</p>;
 
   function confirmDonation() {
     try {

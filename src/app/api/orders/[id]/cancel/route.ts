@@ -4,6 +4,7 @@ import { requireAuth } from "@/lib/authorization";
 import { connectDB } from "@/lib/mongodb";
 import Order from "@/models/Order";
 import Product from "@/models/Product";
+import { awardGreenPoints } from "@/lib/green-points";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -44,6 +45,16 @@ export async function POST(
         { $set: { status: "AVAILABLE" } },
         { session },
       );
+      if (order.gpUsed > 0) {
+        await awardGreenPoints({
+          userId: auth.user.id,
+          amount: order.gpUsed,
+          type: "REFUND",
+          description: "Green Points returned after order cancellation",
+          referenceKey: `order:${order._id.toString()}:gp-refund`,
+          session,
+        });
+      }
       cancelled = true;
     });
 

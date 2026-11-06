@@ -8,6 +8,10 @@ import Order, {
   type IOrderAddress,
 } from "@/models/Order";
 import Product from "@/models/Product";
+import { getBiteshipCourierCode } from "@/lib/biteship";
+import { getShippingRates, ShippingRequestError } from "@/lib/shipping";
+import { getSwapHubs } from "@/lib/hubs";
+import { getGreenPointBalance, redeemGreenPoints } from "@/lib/green-points";
 
 const PAYMENT_EXPIRY_MINUTES = 30;
 
@@ -36,7 +40,17 @@ export async function GET() {
       .sort({ createdAt: -1 })
       .lean();
 
-    return NextResponse.json({ success: true, data: orders });
+    const serializedOrders = orders.map((order) => ({
+      ...order,
+      id: order._id.toString(),
+      items: order.items.map((item) => ({
+        ...item,
+        productId: item.productId.toString(),
+        sellerId: item.sellerId.toString(),
+      })),
+    }));
+
+    return NextResponse.json({ success: true, data: serializedOrders });
   } catch (error) {
     console.error("Get orders error:", error);
     return NextResponse.json(
@@ -64,6 +78,57 @@ export async function POST(request: NextRequest) {
         { success: false, message: "A valid shippingAddress is required for courier delivery." },
         { status: 400 },
       );
+    }
+    const availableHubs = body.deliveryMethod === "pickup"
+      ? await getSwapHubs()
+      : [];
+    const pickupHub = body.deliveryMethod === "pickup"
+      ? availableHubs.find((hub) => hub.id === body.hubId)
+      : undefined;
+    if (body.deliveryMethod === "pickup" && !pickupHub) {
+      return NextResponse.json(
+        { success: false, message: "A valid Swap Hub is required for pickup." },
+        { status: 400 },
+      );
+    }
+    const requestedGp = body.gpUsed === undefined ? 0 : body.gpUsed;
+    if (!Number.isSafeInteger(requestedGp) || requestedGp < 0) {
+      return NextResponse.json({ success: false, message: "gpUsed must be a non-negative integer." }, { status: 400 });
+    }
+
+    let shippingFee = 0;
+    let courierName: string | undefined;
+    let courierServiceCode: string | undefined;
+    let courierService: string | undefined;
+    let estimatedDeliveryTime: string | undefined;
+    const shippingMode = process.env.SHIPPING_MODE === "biteship" ? "biteship" : "mock";
+    let courierCode = typeof body.courierCode === "string"
+      ? getBiteshipCourierCode(body.courierCode)
+      : undefined;
+    if (body.deliveryMethod === "courier") {
+      const currentCart = await Cart.findOne({ userId: auth.user.id }).lean();
+      const currentProducts = await Product.find({
+        _id: { $in: currentCart?.items.map((item) => item.productId) ?? [] },
+        status: "AVAILABLE",
+      }).lean();
+      const rates = await getShippingRates({
+        destinationPostalCode: body.shippingAddress.postalCode,
+        items: currentProducts.map((product) => ({
+          name: product.name,
+          value: product.price,
+          quantity: 1,
+        })),
+      });
+      const selectedRate = rates.find((rate) => rate.courier_code === courierCode) ?? rates[0];
+      if (!selectedRate?.price || !selectedRate.courier_code) {
+        return NextResponse.json({ success: false, message: "No Biteship shipping rate is available for this address." }, { status: 409 });
+      }
+      shippingFee = selectedRate.price;
+      courierCode = selectedRate.courier_code;
+      courierName = selectedRate.courier_name;
+      courierServiceCode = selectedRate.courier_service_code;
+      courierService = selectedRate.courier_service_name;
+      estimatedDeliveryTime = selectedRate.duration;
     }
 
     const session = await mongoose.startSession();
@@ -103,9 +168,12 @@ export async function POST(request: NextRequest) {
           image: product.images[0],
         }));
         const subtotal = items.reduce((total, item) => total + item.price, 0);
-        const shippingFee = 0;
         const serviceFee = 0;
-        const gpUsed = 0;
+        const availableGp = await getGreenPointBalance(auth.user.id, new Date(), session);
+        const gpUsed = Math.min(requestedGp, subtotal);
+        if (gpUsed > availableGp) {
+          throw new Error(`Insufficient Green Points: ${availableGp} GP available.`);
+        }
         const totalAmount = subtotal + shippingFee + serviceFee - gpUsed;
         const expiresAt = new Date(
           Date.now() + PAYMENT_EXPIRY_MINUTES * 60 * 1000,
@@ -122,6 +190,15 @@ export async function POST(request: NextRequest) {
               gpUsed,
               totalAmount,
               deliveryMethod: body.deliveryMethod,
+              courierCode: body.deliveryMethod === "courier" ? courierCode : undefined,
+              courierName,
+              courierServiceCode,
+              courierService,
+              estimatedDeliveryTime,
+              shippingMode: body.deliveryMethod === "courier" ? shippingMode : undefined,
+              shippingOrigin: body.deliveryMethod === "courier"
+                ? { label: "SwapIt origin", postalCode: process.env.BITESHIP_ORIGIN_POSTAL_CODE ?? "15339" }
+                : undefined,
               shippingAddress:
                 body.deliveryMethod === "courier"
                   ? {
@@ -132,6 +209,15 @@ export async function POST(request: NextRequest) {
                       postalCode: body.shippingAddress.postalCode.trim(),
                     }
                   : undefined,
+              pickupHub: pickupHub
+                ? {
+                    id: pickupHub.id,
+                    name: pickupHub.name,
+                    address: pickupHub.address,
+                    distance: pickupHub.distance,
+                    openingHours: pickupHub.openingHours,
+                  }
+                : undefined,
               status: "PENDING_PAYMENT",
               expiresAt,
             },
@@ -139,6 +225,12 @@ export async function POST(request: NextRequest) {
           { session },
         );
         responseOrder.value = created[0].toObject();
+        await redeemGreenPoints({
+          userId: auth.user.id,
+          amount: gpUsed,
+          referenceKey: `order:${created[0]._id.toString()}`,
+          session,
+        });
         paymentSummary.expiresAt = expiresAt;
         paymentSummary.totalAmount = totalAmount;
 
@@ -182,6 +274,8 @@ export async function POST(request: NextRequest) {
       "Products changed availability during checkout.",
     ].includes(message)
       ? 409
+      : error instanceof ShippingRequestError
+        ? 400
       : 500;
     console.error("Create order error:", error);
     return NextResponse.json(

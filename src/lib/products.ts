@@ -40,6 +40,41 @@ export type ProductInput = {
   pickupAddressId?: string;
 };
 
+export type ApiProduct = {
+  _id: string;
+  name: string;
+  category?: string;
+  categoryId?: string;
+  price: number;
+  size: string;
+  condition: ProductCondition;
+  images: string[];
+  sellerId: string;
+};
+
+const CONDITION_LABELS: Record<ProductCondition, string> = {
+  NEW: "New",
+  LIKE_NEW: "Like new",
+  GOOD: "Good",
+  FAIR: "Fair",
+};
+
+export function mapApiProduct(product: ApiProduct): MarketplaceProduct {
+  return {
+    id: product._id,
+    name: product.name,
+    category: product.category ?? product.categoryId ?? "Uncategorized",
+    size: product.size,
+    condition: CONDITION_LABELS[product.condition],
+    gpPrice: product.price,
+    price: product.price,
+    image: product.images?.[0] ?? "/logo.png",
+    imageAlt: product.name,
+    seller: "SwapIt member",
+    distance: "",
+  };
+}
+
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
@@ -223,3 +258,4 @@ export function isProductOwner(
 ) {
   return sellerId.toString() === userId;
 }
+import type { Product as MarketplaceProduct } from "@/data/mock";

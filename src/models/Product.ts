@@ -15,6 +15,7 @@ export type ProductStatus =
 export type ProductFulfillment = "Swap Hub drop-off" | "Pickup";
 
 export interface IProduct {
+  mockId?: string;
   sellerId: mongoose.Types.ObjectId;
 
   // Product information
@@ -43,6 +44,7 @@ export interface IProduct {
 
 const ProductSchema = new Schema<IProduct>(
   {
+    mockId: { type: String, trim: true, unique: true, sparse: true, index: true },
     sellerId: {
       type: Schema.Types.ObjectId,
       required: true,

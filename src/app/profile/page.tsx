@@ -3,14 +3,17 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { ArrowRight, Heart, ListChecks, LogOut, PackageCheck, Settings2, WalletCards } from "lucide-react";
+import { useEffect } from "react";
+import { ArrowRight, Heart, ListChecks, LogOut, PackageCheck, ReceiptText, Settings2, WalletCards } from "lucide-react";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { formatGP } from "@/lib/format";
 import { useSwapStore } from "@/store/useSwapStore";
+import { apiRequest } from "@/lib/api";
 
 const links = [
   { label: "My listings", detail: "Manage your listings and QC", href: "/listings", Icon: ListChecks },
   { label: "My orders", detail: "Track purchases and swaps", href: "/orders", Icon: PackageCheck },
+  { label: "Payment history", detail: "View Midtrans transactions", href: "/payments", Icon: ReceiptText },
   { label: "Green Point wallet", detail: "Balance, expiry, and activity", href: "/wallet", Icon: WalletCards },
   { label: "Settings", detail: "Profile and saved addresses", href: "/profile/settings", Icon: Settings2 },
 ];
@@ -19,9 +22,19 @@ export default function ProfilePage() {
   const router = useRouter();
   const { user, signOut } = useAuth();
   const batches = useSwapStore((state) => state.pointBatches);
-  const balance = batches.reduce((total, batch) => total + batch.remaining, 0);
+  const [ledgerBalance, setLedgerBalance] = useState<number | null>(null);
+  const balance = ledgerBalance ?? batches.reduce((total, batch) => total + batch.remaining, 0);
   const [error, setError] = useState("");
   const [signingOut, setSigningOut] = useState(false);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      apiRequest<{ balance: number }>("/api/green-points")
+        .then((data) => setLedgerBalance(data.balance))
+        .catch((reason: unknown) => console.error("Could not load Green Point balance.", reason));
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   async function handleSignOut() {
     setSigningOut(true);

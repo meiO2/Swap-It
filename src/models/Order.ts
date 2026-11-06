@@ -21,6 +21,19 @@ export interface IOrderAddress {
   postalCode: string;
 }
 
+export interface IShippingOrigin {
+  label: string;
+  postalCode: string;
+}
+
+export interface IPickupHub {
+  id: string;
+  name: string;
+  address: string;
+  distance: string;
+  openingHours: string;
+}
+
 export interface IOrderItem {
   productId: mongoose.Types.ObjectId;
   sellerId: mongoose.Types.ObjectId;
@@ -38,7 +51,15 @@ export interface IOrder {
   gpUsed: number;
   totalAmount: number;
   deliveryMethod: DeliveryMethod;
+  courierCode?: string;
+  courierName?: string;
+  courierServiceCode?: string;
+  courierService?: string;
+  estimatedDeliveryTime?: string;
+  shippingMode?: "mock" | "biteship";
+  shippingOrigin?: IShippingOrigin;
   shippingAddress?: IOrderAddress;
+  pickupHub?: IPickupHub;
   status: OrderStatus;
   expiresAt: Date;
 }
@@ -91,7 +112,24 @@ const OrderSchema = new Schema<IOrder>(
       enum: ["courier", "pickup"],
       required: true,
     },
+    courierCode: { type: String, trim: true },
+    courierName: { type: String, trim: true },
+    courierServiceCode: { type: String, trim: true },
+    courierService: { type: String, trim: true },
+    estimatedDeliveryTime: { type: String, trim: true },
+    shippingMode: { type: String, enum: ["mock", "biteship"] },
+    shippingOrigin: {
+      label: { type: String, trim: true },
+      postalCode: { type: String, trim: true },
+    },
     shippingAddress: { type: AddressSchema },
+    pickupHub: {
+      id: { type: String, trim: true },
+      name: { type: String, trim: true },
+      address: { type: String, trim: true },
+      distance: { type: String, trim: true },
+      openingHours: { type: String, trim: true },
+    },
     status: {
       type: String,
       enum: [

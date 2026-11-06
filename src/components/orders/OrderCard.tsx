@@ -11,7 +11,10 @@ import OrderStatusBadge from "@/components/orders/OrderStatusBadge";
 export default function OrderCard({ order }: { order: OrderShape }) {
   const firstItem = order.items[0];
   const product = catalogProducts.find((item) => item.id === firstItem?.productId);
-  const deliveryLabel = order.delivery?.method === "pickup" ? `Pickup at ${order.delivery.hub?.name ?? "Swap Hub"}` : "Courier";
+  const deliveryLabel = order.deliveryMethod === "pickup" || order.delivery?.method === "pickup"
+    ? `Pickup at ${order.delivery?.hub?.name ?? "Swap Hub"}`
+    : "Courier";
+  const orderTotal = order.totalAmount ?? order.moneyPaid ?? order.subtotal ?? 0;
   return (
     <Link href={`/orders/${order.id}`} className="block rounded-3xl bg-white p-4 shadow-card transition hover:-translate-y-0.5 hover:shadow-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
       <div className="flex items-start gap-3">
@@ -25,7 +28,7 @@ export default function OrderCard({ order }: { order: OrderShape }) {
       </div>
       <div className="mt-3 flex items-center justify-between gap-2 rounded-xl bg-mint-50 p-3 text-xs">
         <span className="min-w-0 truncate text-ink-muted">{deliveryLabel}</span>
-        <span className="shrink-0 font-semibold text-ink">{formatRupiah(order.moneyPaid + order.gpUsed)}</span>
+        <span className="shrink-0 font-semibold text-ink">{formatRupiah(orderTotal)}</span>
       </div>
       <div className="mt-3 flex items-center justify-between text-xs font-semibold text-primary"><span>{getOrderStatusLabel(order) === "Action needed" ? "Review QC decision" : "Track order"}</span><ArrowRight size={15} /></div>
     </Link>

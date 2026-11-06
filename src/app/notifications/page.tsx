@@ -5,13 +5,6 @@ import { ArrowLeft, Bell, Leaf, PackageCheck, ShieldAlert, Sparkles, WalletCards
 import { useSwapStore } from "@/store/useSwapStore";
 import { formatShortDate } from "@/lib/format";
 
-const notifications = [
-  { id: "expiry", title: "Green Points expiring soon", detail: "Some points expire within 30 days. Use them before they go.", time: "Today", href: "/wallet", kind: "wallet" },
-  { id: "order", title: "Your order is being processed", detail: "Your preloved order has been confirmed.", time: "Yesterday", href: "/orders", kind: "order" },
-  { id: "qc", title: "QC report needs your attention", detail: "Choose what happens next within 3 days.", time: "Today", href: "/qc-report/order-qc-demo", kind: "qc" },
-  { id: "match", title: "It’s a match!", detail: "Someone liked one of your pieces. Start a conversation.", time: "Mon", href: "/chat", kind: "match" },
-];
-
 const icons = { wallet: WalletCards, order: PackageCheck, qc: ShieldAlert, match: Sparkles, donation: Leaf };
 
 export default function NotificationsPage() {
@@ -21,14 +14,13 @@ export default function NotificationsPage() {
       ...notification,
       time: formatShortDate(notification.createdAt),
     })),
-    ...notifications,
   ];
 
   return (
     <main className="px-4 pb-6 pt-5">
       <header className="mb-5 flex items-center gap-3"><Link href="/" aria-label="Back home" className="rounded-full p-2 text-ink-muted hover:bg-mint-50"><ArrowLeft size={20} /></Link><div><h1 className="text-xl font-semibold text-ink">Notifications</h1><p className="text-xs text-ink-muted">Important updates from your SwapIt activity</p></div><Bell className="ml-auto text-primary" size={20} /></header>
       <div className="space-y-2">
-        {allNotifications.map((notification) => {
+        {allNotifications.length === 0 ? <p className="rounded-2xl bg-mint-50 p-5 text-center text-sm text-ink-muted">No notifications yet.</p> : allNotifications.map((notification) => {
           const Icon = icons[notification.kind as keyof typeof icons];
           return (
             <Link key={notification.id} href={notification.href} className="flex items-start gap-3 rounded-2xl bg-white p-4 shadow-card hover:bg-mint-50">

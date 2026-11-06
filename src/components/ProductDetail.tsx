@@ -64,6 +64,21 @@ export default function ProductDetail({ id }: { id: string }) {
 
         if (active) {
           setProduct(result.data);
+          try {
+            const cartResponse = await fetch("/api/cart", { cache: "no-store" });
+            if (cartResponse.ok) {
+              const cartResult = await cartResponse.json();
+              const inCart = cartResult.success && cartResult.data?.items?.some(
+                (item: { productId?: { _id?: string } | string }) =>
+                  typeof item.productId === "string"
+                    ? item.productId === result.data._id
+                    : item.productId?._id === result.data._id,
+              );
+              setAdded(Boolean(inCart));
+            }
+          } catch {
+            // Cart availability should not prevent the product from loading.
+          }
         }
       } catch (err) {
         if (active) {
@@ -109,6 +124,7 @@ export default function ProductDetail({ id }: { id: string }) {
       }
 
       setAdded(true);
+      window.dispatchEvent(new Event("cart-updated"));
 
       if (redirectToCheckout) {
         router.push("/checkout");
@@ -120,6 +136,15 @@ export default function ProductDetail({ id }: { id: string }) {
     } finally {
       setAdding(false);
     }
+  }
+
+  function handleBuyNow() {
+    if (adding || !product) return;
+    if (added) {
+      router.push("/checkout");
+      return;
+    }
+    void handleAddToCart(true);
   }
 
   if (loading) {
@@ -264,14 +289,14 @@ export default function ProductDetail({ id }: { id: string }) {
             className="flex h-11 items-center justify-center gap-2 rounded-full border border-primary text-xs font-semibold text-primary hover:bg-mint-50 disabled:opacity-60"
           >
             <ShoppingBag size={16} />
-            {adding ? "Adding..." : added ? "Added to cart" : "Add to cart"}
+            {adding ? "Adding..." : added ? "Already in cart" : "Add to cart"}
           </button>
         </div>
 
         <button
           type="button"
           disabled={adding}
-          onClick={() => handleAddToCart(true)}
+          onClick={handleBuyNow}
           className="h-12 w-full rounded-full bg-primary text-sm font-semibold text-white shadow-primary hover:bg-primary-dark disabled:opacity-60"
         >
           {adding ? "Please wait..." : "Buy now"}

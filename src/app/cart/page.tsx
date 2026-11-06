@@ -3,6 +3,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
   ArrowRight,
@@ -28,6 +29,7 @@ interface CartItem {
 }
 
 export default function CartPage() {
+  const searchParams = useSearchParams();
   const [items, setItems] = useState<CartItem[]>([]);
   const [subtotal, setSubtotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -63,8 +65,13 @@ export default function CartPage() {
   }, []);
 
   useEffect(() => {
-    fetchCart();
-  }, [fetchCart]);
+    const paymentError = searchParams.get("paymentError");
+    const timer = window.setTimeout(async () => {
+      await fetchCart();
+      if (paymentError) setError(paymentError);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [fetchCart, searchParams]);
 
   async function handleRemove(productId: string) {
     try {

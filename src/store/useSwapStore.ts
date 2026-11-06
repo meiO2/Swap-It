@@ -6,7 +6,6 @@ import { calculatePurchaseReward, createPointBatch, getAvailablePointBalance, sp
 import { getExpiryDate } from "@/lib/hub";
 import {
   buildTimeline,
-  createDemoOrders,
   createTrackingEvent,
   estimateArrival,
   generateOrderId,
@@ -86,49 +85,18 @@ type SwapStore = {
   updateSwapStatus: (chatId: string, status: "Proposed" | "Accepted" | "Completed") => void;
 };
 
-const initialPointBatches: PointBatch[] = [
-  { id: "batch-spring", remaining: 120000, earnedAt: "2026-05-01T00:00:00.000Z", expiresAt: "2027-05-01T00:00:00.000Z" },
-  { id: "batch-community", remaining: 80000, earnedAt: "2025-11-08T00:00:00.000Z", expiresAt: "2026-11-08T00:00:00.000Z" },
-  { id: "batch-swap", remaining: 150000, earnedAt: "2026-09-10T00:00:00.000Z", expiresAt: "2027-09-10T00:00:00.000Z" },
-];
+const initialPointBatches: PointBatch[] = [];
 
 export const useSwapStore = create<SwapStore>()(
   persist(
     (set, get) => ({
       pointBatches: initialPointBatches,
-      transactions: [
-        { id: "tx-1", kind: "earned", amount: 150000, label: "Swap Hub donation", createdAt: "2026-09-10T00:00:00.000Z" },
-        { id: "tx-2", kind: "earned", amount: 80000, label: "Community reward", createdAt: "2025-11-08T00:00:00.000Z" },
-      ],
+      transactions: [],
       notifications: [],
       donationReceipts: [],
       cart: [],
-      orders: [{
-        id: "order-qc-demo",
-        items: [{ productId: "summer-dress", productValue: 180000, quantity: 1 }],
-        productValue: 180000,
-        shippingFee: 15000,
-        serviceFee: 5000,
-        gpUsed: 80000,
-        moneyPaid: 120000,
-        status: "QC review",
-        createdAt: "2026-10-27T15:52:00.000Z",
-        rewardGranted: false,
-        qcDecisionDeadline: "2026-10-30T15:52:00.000Z",
-        sellerRetrievalDeadline: "2026-11-10T15:52:00.000Z",
-      }, ...createDemoOrders()],
-      listings: [{
-        id: "listing-unsold-demo",
-        title: "Linen blend shirt",
-        category: "Tops",
-        size: "M",
-        condition: "Very good",
-        price: 150000,
-        status: "Unsold",
-        createdAt: "2026-07-27T00:00:00.000Z",
-        fulfillment: "Swap Hub drop-off",
-        pickupChanges: 0,
-      }],
+      orders: [],
+      listings: [],
       messagesByChat: {},
       swapStatuses: {},
       addToCart: (productId) => set((state) => {
@@ -418,10 +386,7 @@ export const useSwapStore = create<SwapStore>()(
       sendChatMessage: (chatId, text) => {
         const message = text.trim();
         if (!message) return;
-        const existing = get().messagesByChat[chatId] ?? [
-          { id: 1, text: "Hi! I’m interested in this piece. Is it still available?", own: true, time: "10:32" },
-          { id: 2, text: "Yes, it’s still available! Happy to share more details.", own: false, time: "10:42" },
-        ];
+        const existing = get().messagesByChat[chatId] ?? [];
         set((state) => ({
           messagesByChat: {
             ...state.messagesByChat,
@@ -440,34 +405,16 @@ export const useSwapStore = create<SwapStore>()(
       merge: (persistedState, currentState) => {
         const persisted = (persistedState ?? {}) as Partial<SwapStore>;
         const savedOrders = Array.isArray(persisted.orders) ? persisted.orders : currentState.orders;
-        const demoOrders = createDemoOrders();
-        const orders = [
-          ...savedOrders,
-          ...demoOrders.filter((demo) => !savedOrders.some((saved) => saved.id === demo.id)),
-        ];
+        const orders = savedOrders;
         const savedTransactions = Array.isArray(persisted.transactions) ? persisted.transactions : currentState.transactions;
-        const rewardOrdersToSeed = demoOrders.filter((demo) =>
-          demo.rewardGranted && !savedTransactions.some((transaction) => transaction.id === `tx-${demo.id}`),
-        );
-        const seededRewardBatches = rewardOrdersToSeed.map((order) =>
-          createPointBatch(`reward-${order.id}`, calculatePurchaseReward(order.productValue), new Date(order.createdAt)),
-        );
-        const seededRewardTransactions: WalletTransaction[] = rewardOrdersToSeed.map((order) => ({
-          id: `tx-${order.id}`,
-          kind: "earned",
-          amount: calculatePurchaseReward(order.productValue),
-          label: "2% completed order reward",
-          createdAt: order.createdAt,
-        }));
         return {
           ...currentState,
           ...persisted,
           orders,
           pointBatches: [
             ...(Array.isArray(persisted.pointBatches) ? persisted.pointBatches : currentState.pointBatches),
-            ...seededRewardBatches.filter((batch) => !(persisted.pointBatches ?? []).some((saved) => saved.id === batch.id)),
           ],
-          transactions: [...savedTransactions, ...seededRewardTransactions],
+          transactions: savedTransactions,
         };
       },
     },

@@ -1,6 +1,15 @@
 import { getOrderStatusLabel, type OrderShape } from "@/lib/orders";
 
 const colors: Record<string, string> = {
+  PENDING_PAYMENT: "bg-warning/15 text-warning",
+  PAID: "bg-primary/10 text-primary",
+  PROCESSING: "bg-warning/15 text-warning",
+  SHIPPED: "bg-info/15 text-info",
+  DELIVERED: "bg-success/15 text-success",
+  COMPLETED: "bg-success/15 text-success",
+  CANCELLED: "bg-danger/10 text-danger",
+  EXPIRED: "bg-danger/10 text-danger",
+  REFUNDED: "bg-danger/10 text-danger",
   Processing: "bg-warning/15 text-warning",
   "QC review": "bg-danger/10 text-danger",
   "Not eligible": "bg-danger/10 text-danger",

@@ -4,6 +4,7 @@
     import { connectDB } from "@/lib/mongodb";
     import Donation from "@/models/Donation";
     import { requireRole } from "@/lib/authorization";
+    import { awardGreenPoints, GREEN_POINT_REWARDS } from "@/lib/green-points";
 
     type RouteContext = {
     params: Promise<{ id: string }>;
@@ -29,15 +30,21 @@
         }
 
         const body = await request.json();
-        const { acceptedItems, rejectedItems } = body;
+        const {
+            resaleQualityItems = 0,
+            upcyclingQualityItems = 0,
+            socialDonationItems = 0,
+            rejectedItems = 0,
+        } = body;
 
         // Validate quantities
-        if (
-        !Number.isSafeInteger(acceptedItems) ||
-        !Number.isSafeInteger(rejectedItems) ||
-        acceptedItems < 0 ||
-        rejectedItems < 0
-        ) {
+        const qualityCounts = [
+            resaleQualityItems,
+            upcyclingQualityItems,
+            socialDonationItems,
+            rejectedItems,
+        ];
+        if (qualityCounts.some((value) => !Number.isSafeInteger(value) || value < 0)) {
         return NextResponse.json(
             {
             success: false,
@@ -63,8 +70,15 @@
         );
         }
 
+        const acceptedItems = resaleQualityItems + upcyclingQualityItems + socialDonationItems;
         const totalItems = acceptedItems + rejectedItems;
-        const gpAwarded = acceptedItems * 100;
+        if (totalItems < 1) {
+            return NextResponse.json({ success: false, message: "Quality counts must match the donation item count." }, { status: 400 });
+        }
+        const gpAwarded =
+            resaleQualityItems * GREEN_POINT_REWARDS.donationResaleQualityPerItem +
+            upcyclingQualityItems * GREEN_POINT_REWARDS.donationUpcyclingQualityPerItem +
+            socialDonationItems * GREEN_POINT_REWARDS.donationSocialPerItem;
 
         // Finalize donation
         const updatedDonation = await Donation.findOneAndUpdate(
@@ -73,6 +87,9 @@
             $set: {
             acceptedItems,
             rejectedItems,
+            resaleQualityItems,
+            upcyclingQualityItems,
+            socialDonationItems,
             totalItems,
             gpAwarded,
             status: "COMPLETED",
@@ -90,6 +107,14 @@
             },
             { status: 409 }
         );
+        }
+        if (gpAwarded > 0) {
+            await awardGreenPoints({
+                userId: donation.userId.toString(),
+                amount: gpAwarded,
+                description: `Donation reward for ${acceptedItems} accepted item${acceptedItems === 1 ? "" : "s"}`,
+                referenceKey: `donation:${donation._id.toString()}`,
+            });
         }
 
         return NextResponse.json(

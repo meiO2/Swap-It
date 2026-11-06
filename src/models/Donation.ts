@@ -8,6 +8,9 @@
     totalItems: number;
     acceptedItems: number;
     rejectedItems: number;
+    resaleQualityItems: number;
+    upcyclingQualityItems: number;
+    socialDonationItems: number;
     gpAwarded: number;
     status: "PENDING" | "COMPLETED" | "CANCELLED";
     confirmedAt?: Date;
@@ -52,6 +55,10 @@
         min: 0,
         default: 0,
         },
+
+        resaleQualityItems: { type: Number, min: 0, default: 0 },
+        upcyclingQualityItems: { type: Number, min: 0, default: 0 },
+        socialDonationItems: { type: Number, min: 0, default: 0 },
 
         gpAwarded: {
         type: Number,

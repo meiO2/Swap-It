@@ -22,7 +22,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" className={poppins.variable}>
       <body className="min-h-dvh">
-        <Suspense fallback={<div className="mx-auto min-h-dvh w-full max-w-[430px] bg-background">{children}</div>}>
+        <Suspense fallback={<div className="mx-auto min-h-dvh w-full max-w-[430px] bg-background" aria-busy="true" />}>
           <AuthProvider><AppShell>{children}</AppShell></AuthProvider>
         </Suspense>
       </body>

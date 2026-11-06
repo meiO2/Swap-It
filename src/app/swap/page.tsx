@@ -5,15 +5,39 @@ import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowLeft, Heart, MapPin, RotateCcw, ShieldCheck, X } from "lucide-react";
 import { useState } from "react";
-import { products } from "@/data/mock";
+import { useEffect } from "react";
+import type { Product } from "@/data/mock";
+import { mapApiProduct, type ApiProduct } from "@/lib/products";
 
 export default function SwapPage() {
+  const [products, setProducts] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(true);
   const [activeIndex, setActiveIndex] = useState(0);
   const [matched, setMatched] = useState(false);
   const [matchedProduct, setMatchedProduct] = useState<(typeof products)[number] | null>(null);
   const [direction, setDirection] = useState(0);
   const [pendingMatch, setPendingMatch] = useState(false);
   const [isExiting, setIsExiting] = useState(false);
+  useEffect(() => {
+    fetch("/api/products?limit=50")
+      .then(async (response) => {
+        const result = await response.json() as { success: boolean; data?: ApiProduct[] };
+        if (!response.ok || !result.success) throw new Error("Failed to load products.");
+        setProducts((result.data ?? []).map(mapApiProduct));
+      })
+      .catch((error) => console.error("Swap products error:", error))
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading || products.length === 0) {
+    return (
+      <main className="px-4 pb-6 pt-5">
+        <Link href="/" className="text-sm font-semibold text-primary">Back home</Link>
+        <p className="mt-8 rounded-2xl bg-mint-50 p-5 text-center text-sm text-ink-muted">{loading ? "Loading products..." : "No products are available for swapping yet."}</p>
+      </main>
+    );
+  }
+
   const activeProduct = products[activeIndex % products.length];
   const nextProduct = products[(activeIndex + 1) % products.length];
 
