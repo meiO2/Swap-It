@@ -62,7 +62,12 @@ export async function GET(
       );
     }
 
-    const product = await Product.findOne({ _id: id, status: "AVAILABLE" }).lean();
+    const product = await Product.findOne({
+      _id: id,
+      status: "AVAILABLE",
+    })
+      .populate("sellerId", "name")
+      .lean();
     if (!product) {
       return NextResponse.json(
         { success: false, message: "Product not found." },

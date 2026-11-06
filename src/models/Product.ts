@@ -1,6 +1,9 @@
+
 import mongoose, { Model, Schema } from "mongoose";
+import type { IUserAddress } from "@/models/User";
 
 export type ProductCondition = "NEW" | "LIKE_NEW" | "GOOD" | "FAIR";
+
 export type ProductStatus =
   | "AVAILABLE"
   | "RESERVED"
@@ -9,18 +12,33 @@ export type ProductStatus =
   | "REVAMP_ELIGIBLE"
   | "REVAMPED";
 
+export type ProductFulfillment = "Swap Hub drop-off" | "Pickup";
+
 export interface IProduct {
   sellerId: mongoose.Types.ObjectId;
+
+  // Product information
   name: string;
   description: string;
-  categoryId: mongoose.Types.ObjectId;
+  category: string;
   brand?: string;
   price: number;
   size: string;
   condition: ProductCondition;
   images: string[];
+
+  // Seller handover preferences
+  fulfillment: ProductFulfillment;
+  pickupDate?: string;
+  pickupAddress?: IUserAddress;
+  pickupChanges: number;
+
+  // Product lifecycle
   status: ProductStatus;
   publishedAt: Date | null;
+
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 const ProductSchema = new Schema<IProduct>(
@@ -31,6 +49,7 @@ const ProductSchema = new Schema<IProduct>(
       ref: "User",
       index: true,
     },
+
     name: {
       type: String,
       required: true,
@@ -38,28 +57,34 @@ const ProductSchema = new Schema<IProduct>(
       minlength: 2,
       maxlength: 120,
     },
+
     description: {
       type: String,
       required: true,
       trim: true,
       maxlength: 2000,
     },
-    categoryId: {
-      type: Schema.Types.ObjectId,
+
+    category: {
+      type: String,
       required: true,
-      ref: "Category",
+      trim: true,
+      maxlength: 80,
       index: true,
     },
+
     brand: {
       type: String,
       trim: true,
       maxlength: 80,
     },
+
     price: {
       type: Number,
       required: true,
       min: 1,
     },
+
     size: {
       type: String,
       required: true,
@@ -67,12 +92,14 @@ const ProductSchema = new Schema<IProduct>(
       maxlength: 30,
       index: true,
     },
+
     condition: {
       type: String,
       enum: ["NEW", "LIKE_NEW", "GOOD", "FAIR"],
       required: true,
       index: true,
     },
+
     images: {
       type: [String],
       required: true,
@@ -82,6 +109,31 @@ const ProductSchema = new Schema<IProduct>(
         message: "A product must have between 1 and 8 images.",
       },
     },
+
+    // Seller chooses how the physical item reaches SwapIt.
+    fulfillment: {
+      type: String,
+      enum: ["Swap Hub drop-off", "Pickup"],
+      default: "Swap Hub drop-off",
+      required: true,
+    },
+
+    pickupDate: {
+      type: String,
+    },
+
+    pickupAddress: {
+      type: Schema.Types.Mixed,
+    },
+
+    pickupChanges: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 1,
+    },
+
+    // Newly submitted products are immediately available.
     status: {
       type: String,
       enum: [
@@ -96,6 +148,7 @@ const ProductSchema = new Schema<IProduct>(
       required: true,
       index: true,
     },
+
     publishedAt: {
       type: Date,
       default: null,

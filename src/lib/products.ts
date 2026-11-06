@@ -1,6 +1,11 @@
-import mongoose from "mongoose";
 
-export const PRODUCT_CONDITIONS = ["NEW", "LIKE_NEW", "GOOD", "FAIR"] as const;
+export const PRODUCT_CONDITIONS = [
+  "NEW",
+  "LIKE_NEW",
+  "GOOD",
+  "FAIR",
+] as const;
+
 export type ProductCondition = (typeof PRODUCT_CONDITIONS)[number];
 
 export const PRODUCT_STATUSES = [
@@ -11,22 +16,48 @@ export const PRODUCT_STATUSES = [
   "REVAMP_ELIGIBLE",
   "REVAMPED",
 ] as const;
+
 export type ProductStatus = (typeof PRODUCT_STATUSES)[number];
+
+export const PRODUCT_FULFILLMENT = [
+  "Swap Hub drop-off",
+  "Pickup",
+] as const;
+
+export type ProductFulfillment =
+  (typeof PRODUCT_FULFILLMENT)[number];
 
 export type ProductInput = {
   name: string;
   description: string;
-  categoryId: string;
-  brand?: string;
+  category: string;
   price: number;
   size: string;
   condition: ProductCondition;
   images: string[];
-  status?: ProductStatus;
+  fulfillment: ProductFulfillment;
+  pickupDate?: string;
+  pickupAddressId?: string;
 };
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+function normalizeCondition(value: unknown): ProductCondition | null {
+  if (typeof value !== "string") return null;
+
+  const normalized = value.trim().toUpperCase().replace(/[\s-]+/g, "_");
+
+  const aliases: Record<string, ProductCondition> = {
+    NEW: "NEW",
+    LIKE_NEW: "LIKE_NEW",
+    VERY_GOOD: "GOOD",
+    GOOD: "GOOD",
+    FAIR: "FAIR",
+  };
+
+  return aliases[normalized] ?? null;
 }
 
 export function parseProductInput(
@@ -40,94 +71,154 @@ export function parseProductInput(
   const input = body as Record<string, unknown>;
   const data: Partial<ProductInput> = {};
 
-  const requiredStrings = ["name", "description", "size"] as const;
-  for (const field of requiredStrings) {
-    if (!(field in input) && partial) continue;
-    if (!isNonEmptyString(input[field])) {
-      return { data: {}, error: `${field} is required.` };
+  // Accept the old seller form's "title" field as an alias for "name".
+  const name = input.name ?? input.title;
+
+  if (!partial || name !== undefined) {
+    if (!isNonEmptyString(name)) {
+      return { data: {}, error: "Product name is required." };
     }
-    data[field] = input[field].trim();
+    data.name = name.trim();
   }
 
-  if (!("categoryId" in input) && partial) {
-    // Keep the existing category when updating other fields.
-  } else if (
-    !isNonEmptyString(input.categoryId) ||
-    !mongoose.Types.ObjectId.isValid(input.categoryId)
-  ) {
-    return { data: {}, error: "categoryId must be a valid category ID." };
-  } else {
-    data.categoryId = input.categoryId;
-  }
-
-  if ("brand" in input || !partial) {
-    if (input.brand !== undefined && typeof input.brand !== "string") {
-      return { data: {}, error: "brand must be a string." };
+  if (!partial || input.description !== undefined) {
+    if (typeof input.description !== "string") {
+      return { data: {}, error: "Product description is required." };
     }
-    data.brand =
-      typeof input.brand === "string" ? input.brand.trim() : undefined;
+    data.description = input.description.trim();
   }
 
-  if (!("price" in input) && partial) {
-    // Keep the existing price when updating other fields.
-  } else if (
-    typeof input.price !== "number" ||
-    !Number.isSafeInteger(input.price) ||
-    input.price < 1
-  ) {
-    return { data: {}, error: "price must be an integer greater than zero." };
-  } else {
-    data.price = input.price;
+  if (!partial || input.category !== undefined) {
+    if (!isNonEmptyString(input.category)) {
+      return { data: {}, error: "Product category is required." };
+    }
+    data.category = input.category.trim();
   }
 
-  if (!("condition" in input) && partial) {
-    // Keep the existing condition when updating other fields.
-  } else if (
-    typeof input.condition !== "string" ||
-    !PRODUCT_CONDITIONS.includes(input.condition as ProductCondition)
-  ) {
-    return {
-      data: {},
-      error: `condition must be one of: ${PRODUCT_CONDITIONS.join(", ")}.`,
-    };
-  } else {
-    data.condition = input.condition as ProductCondition;
+  if (!partial || input.size !== undefined) {
+    if (!isNonEmptyString(input.size)) {
+      return { data: {}, error: "Product size is required." };
+    }
+    data.size = input.size.trim();
   }
 
-  if (!("images" in input) && partial) {
-    // Keep the existing images when updating other fields.
-  } else if (
-    !Array.isArray(input.images) ||
-    input.images.length < 1 ||
-    input.images.length > 8 ||
-    input.images.some((image) => !isNonEmptyString(image))
-  ) {
-    return {
-      data: {},
-      error: "images must contain between 1 and 8 non-empty strings.",
-    };
-  } else {
-    data.images = input.images.map((image) => image.trim());
-  }
-
-  if ("status" in input) {
+  if (!partial || input.price !== undefined) {
     if (
-      typeof input.status !== "string" ||
-      !PRODUCT_STATUSES.includes(input.status as ProductStatus)
+      typeof input.price !== "number" ||
+      !Number.isSafeInteger(input.price) ||
+      input.price < 1
     ) {
       return {
         data: {},
-        error: `status must be one of: ${PRODUCT_STATUSES.join(", ")}.`,
+        error: "Price must be an integer greater than zero.",
       };
     }
-    data.status = input.status as ProductStatus;
+    data.price = input.price;
+  }
+
+  if (!partial || input.condition !== undefined) {
+    const condition = normalizeCondition(input.condition);
+
+    if (!condition) {
+      return {
+        data: {},
+        error: "Choose a valid product condition.",
+      };
+    }
+
+    data.condition = condition;
+  }
+
+  if (!partial || input.images !== undefined || input.image !== undefined) {
+    // Support the old seller form's single optional image URL.
+    const images =
+      input.images !== undefined
+        ? input.images
+        : typeof input.image === "string" && input.image.trim()
+          ? [input.image]
+          : ["/logo.png"];
+
+    if (
+      !Array.isArray(images) ||
+      images.length < 1 ||
+      images.length > 8 ||
+      images.some((image) => !isNonEmptyString(image))
+    ) {
+      return {
+        data: {},
+        error: "Provide between 1 and 8 valid product images.",
+      };
+    }
+
+    data.images = images.map((image) => image.trim());
+  }
+
+  if (!partial || input.fulfillment !== undefined) {
+    if (
+      typeof input.fulfillment !== "string" ||
+      !PRODUCT_FULFILLMENT.includes(
+        input.fulfillment as ProductFulfillment,
+      )
+    ) {
+      return {
+        data: {},
+        error: "Choose a valid handover method.",
+      };
+    }
+
+    data.fulfillment = input.fulfillment as ProductFulfillment;
+  }
+
+  if (input.pickupDate !== undefined) {
+    if (
+      typeof input.pickupDate !== "string" ||
+      !Number.isFinite(Date.parse(`${input.pickupDate}T23:59:59`)) ||
+      Date.parse(`${input.pickupDate}T23:59:59`) < Date.now()
+    ) {
+      return {
+        data: {},
+        error: "Choose a valid future pickup date.",
+      };
+    }
+
+    data.pickupDate = input.pickupDate;
+  }
+
+  if (input.pickupAddressId !== undefined) {
+    if (!isNonEmptyString(input.pickupAddressId)) {
+      return {
+        data: {},
+        error: "Choose a valid saved pickup address.",
+      };
+    }
+
+    data.pickupAddressId = input.pickupAddressId.trim();
+  }
+
+  if (data.fulfillment === "Pickup" || input.fulfillment === "Pickup") {
+    const hasExistingAddress =
+      partial && input.pickupAddressId === undefined;
+
+    if (!hasExistingAddress && !data.pickupAddressId) {
+      return {
+        data: {},
+        error: "Choose a saved pickup address.",
+      };
+    }
+
+    if (!data.pickupDate && !partial) {
+      return {
+        data: {},
+        error: "Choose a pickup date.",
+      };
+    }
   }
 
   return { data };
 }
 
 export function isProductOwner(
-  sellerId: mongoose.Types.ObjectId,
+  sellerId: { toString(): string },
   userId: string,
 ) {
   return sellerId.toString() === userId;
