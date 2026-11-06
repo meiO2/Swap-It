@@ -41,3 +41,6 @@ yarn-error.log*
 next-env.d.ts
 
 .env.local
+
+# ESP32 private credentials
+/SwapHub_ESP32/config/secrets.h
