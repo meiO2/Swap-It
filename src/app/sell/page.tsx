@@ -70,7 +70,17 @@ export default function SellPage() {
           <Field label="Size"><select name="size" required className="form-input"><option value="">Select</option>{["XS", "S", "M", "L", "XL", "One size"].map((item) => <option key={item}>{item}</option>)}</select></Field>
         </div>
         <Field label="Condition"><select name="condition" required className="form-input"><option value="">Select condition</option>{["Like new", "Very good", "Good"].map((item) => <option key={item}>{item}</option>)}</select></Field>
-        <Field label="Listing price (Rp)"><input name="price" type="number" min="1" step="1000" required placeholder="125000" className="form-input" /></Field>
+        <Field label="Listing price (Rp)">
+          <input
+            name="price"
+            type="number"
+            min="1"
+            step="1"
+            required
+            placeholder="125000"
+            className="form-input"
+          />
+        </Field>
         <fieldset>
           <legend className="mb-2 text-xs font-semibold text-ink">How will you hand it over?</legend>
           <div className="grid grid-cols-2 gap-2">
