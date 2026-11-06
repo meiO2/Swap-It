@@ -1,3 +1,4 @@
+
 import mongoose, { Model, Schema } from "mongoose";
 
 export type OrderStatus =
@@ -21,12 +22,43 @@ export interface IOrderAddress {
   postalCode: string;
 }
 
+export type HandoverMethod = "HUB_DROP_OFF" | "PICKUP";
+
+export type HandoverStatus =
+  | "AWAITING_PAYMENT"
+  | "AWAITING_SELLER_SCHEDULE"
+  | "SCHEDULED"
+  | "IN_TRANSIT"
+  | "RECEIVED"
+  | "CANCELLED";
+
+export interface IOrderHandover {
+  method: HandoverMethod;
+  status: HandoverStatus;
+
+  // Selected by seller after purchase.
+  hubId?: string;
+  hubName?: string;
+  hubAddress?: string;
+
+  // Seller's requested pickup/drop-off date and time.
+  scheduledAt?: Date;
+
+  // Snapshot of the seller's pickup address.
+  pickupAddress?: IOrderAddress;
+
+  requestedAt?: Date;
+  receivedAt?: Date;
+  receivedBy?: mongoose.Types.ObjectId;
+}
+
 export interface IOrderItem {
   productId: mongoose.Types.ObjectId;
   sellerId: mongoose.Types.ObjectId;
   name: string;
   price: number;
   image?: string;
+  handover?: IOrderHandover;
 }
 
 export interface IOrder {
@@ -41,18 +73,10 @@ export interface IOrder {
   shippingAddress?: IOrderAddress;
   status: OrderStatus;
   expiresAt: Date;
-}
 
-const OrderItemSchema = new Schema<IOrderItem>(
-  {
-    productId: { type: Schema.Types.ObjectId, required: true, ref: "Product" },
-    sellerId: { type: Schema.Types.ObjectId, required: true, ref: "User" },
-    name: { type: String, required: true },
-    price: { type: Number, required: true, min: 1 },
-    image: { type: String },
-  },
-  { _id: false },
-);
+  createdAt?: Date;
+  updatedAt?: Date;
+}
 
 const AddressSchema = new Schema<IOrderAddress>(
   {
@@ -61,6 +85,58 @@ const AddressSchema = new Schema<IOrderAddress>(
     address: { type: String, required: true, trim: true },
     city: { type: String, required: true, trim: true },
     postalCode: { type: String, required: true, trim: true },
+  },
+  { _id: false },
+);
+
+const HandoverSchema = new Schema<IOrderHandover>(
+  {
+    method: {
+      type: String,
+      enum: ["HUB_DROP_OFF", "PICKUP"],
+      required: true,
+    },
+    status: {
+      type: String,
+      enum: [
+        "AWAITING_PAYMENT",
+        "AWAITING_SELLER_SCHEDULE",
+        "SCHEDULED",
+        "IN_TRANSIT",
+        "RECEIVED",
+        "CANCELLED",
+      ],
+      default: "AWAITING_PAYMENT",
+      required: true,
+    },
+    hubId: { type: String, trim: true },
+    hubName: { type: String, trim: true },
+    hubAddress: { type: String, trim: true },
+    scheduledAt: { type: Date },
+    pickupAddress: { type: AddressSchema },
+    requestedAt: { type: Date },
+    receivedAt: { type: Date },
+    receivedBy: { type: Schema.Types.ObjectId, ref: "User" },
+  },
+  { _id: false },
+);
+
+const OrderItemSchema = new Schema<IOrderItem>(
+  {
+    productId: {
+      type: Schema.Types.ObjectId,
+      required: true,
+      ref: "Product",
+    },
+    sellerId: {
+      type: Schema.Types.ObjectId,
+      required: true,
+      ref: "User",
+    },
+    name: { type: String, required: true },
+    price: { type: Number, required: true, min: 1 },
+    image: { type: String },
+    handover: { type: HandoverSchema },
   },
   { _id: false },
 );

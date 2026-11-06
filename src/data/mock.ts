@@ -73,6 +73,16 @@ export type SwapHub = {
   address: string;
   distance: string;
   position: [number, number];
+
+  // The drop box itself is available 24/7.
+  dropBoxAvailability: "24/7";
+
+  // Access to the premises where the box is installed.
+  hostAccess: "UNRESTRICTED" | "RESTRICTED" | "UNCONFIRMED";
+  hostAccessHours?: string;
+  accessInstructions: string;
+
+  // Kept temporarily for existing pages that still use this field.
   openingHours: string;
 };
 
@@ -102,7 +112,12 @@ export const swapHubs: SwapHub[] = [
     address: "BSD City, Tangerang",
     distance: "0.4 km",
     position: [-6.3025, 106.6526],
-    openingHours: "Daily, 08:00–20:00",
+    dropBoxAvailability: "24/7",
+    hostAccess: "UNCONFIRMED",
+    hostAccessHours: undefined,
+    accessInstructions:
+      "The drop box is available 24/7. Access to the premises may depend on the host location.",
+    openingHours: "Host location access to be confirmed",
   },
   {
     id: "hub-prasmul",
@@ -110,7 +125,12 @@ export const swapHubs: SwapHub[] = [
     address: "Universitas Prasetiya Mulya, BSD",
     distance: "0.4 km",
     position: [-6.3025, 106.6526],
-    openingHours: "Daily, 08:00–20:00",
+        dropBoxAvailability: "24/7",
+    hostAccess: "UNCONFIRMED",
+    hostAccessHours: undefined,
+    accessInstructions:
+      "The drop box is available 24/7. Access to the premises may depend on the host location.",
+    openingHours: "Host location access to be confirmed",
   },
   {
     id: "hub-ice",
@@ -118,7 +138,12 @@ export const swapHubs: SwapHub[] = [
     address: "Indonesia Convention Exhibition, BSD",
     distance: "2.1 km",
     position: [-6.3028, 106.6342],
-    openingHours: "Daily, 10:00–21:00",
+    dropBoxAvailability: "24/7",
+    hostAccess: "UNCONFIRMED",
+    hostAccessHours: undefined,
+    accessInstructions:
+      "The drop box is available 24/7. Access to the premises may depend on the host location.",
+    openingHours: "Host location access to be confirmed",
   },
   {
     id: "hub-qbig",
@@ -126,7 +151,12 @@ export const swapHubs: SwapHub[] = [
     address: "QBig BSD City, Sampora",
     distance: "3.6 km",
     position: [-6.3005, 106.6458],
-    openingHours: "Daily, 10:00–22:00",
+    dropBoxAvailability: "24/7",
+    hostAccess: "UNCONFIRMED",
+    hostAccessHours: undefined,
+    accessInstructions:
+      "The drop box is available 24/7. Access to the premises may depend on the host location.",
+    openingHours: "Host location access to be confirmed",
   },
 ];
 
