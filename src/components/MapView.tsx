@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import type { SwapHub } from "@/data/mock";
+import type { SwapHub } from "@/lib/hubs";
 
 const MapCanvas = dynamic(() => import("@/components/MapCanvas"), {
   ssr: false,

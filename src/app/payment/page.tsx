@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useState } from "react";
-import { ArrowLeft, Building2, CreditCard, QrCode, Store, WalletCards } from "lucide-react";
+import { ArrowLeft, Building2, CreditCard, Store, WalletCards } from "lucide-react";
 import { apiRequest } from "@/lib/api";
 import { formatRupiah } from "@/lib/format";
 
@@ -89,7 +89,12 @@ export default function PaymentPage() {
     }
   }
 
-  const action = payment?.paymentData?.actions?.find((item) => item.name === "generate-qr-code" || item.name === "deeplink-redirect");
+  const qrAction = payment?.paymentData?.actions?.find(
+    (item) => item.name === "generate-qr-code",
+  );
+  const paymentAction = payment?.paymentData?.actions?.find(
+    (item) => item.name === "deeplink-redirect",
+  );
 
   return (
     <main className="min-h-dvh px-4 pb-8 pt-5">
@@ -137,7 +142,21 @@ export default function PaymentPage() {
             {payment.paymentData?.va_numbers?.map((item) => <p key={item.va_number} className="mt-3 font-semibold">{item.bank.toUpperCase()} VA: {item.va_number}</p>)}
             {payment.paymentData?.permata_va_number && <p className="mt-3 font-semibold">Permata VA: {payment.paymentData.permata_va_number}</p>}
             {payment.paymentData?.bill_key && <p className="mt-3 font-semibold">Bill key: {payment.paymentData.bill_key}</p>}
-            {action && <a className="mt-3 inline-flex items-center gap-2 font-semibold text-primary" href={action.url} target="_blank" rel="noreferrer">{action.name === "generate-qr-code" ? <QrCode size={16} /> : <WalletCards size={16} />} Open payment</a>}
+            {selected === "qris" && qrAction && (
+              <div className="mt-4 rounded-2xl bg-white p-4 text-center">
+                <p className="text-xs font-semibold text-ink">Scan this QR code to pay</p>
+                <img
+                  src={qrAction.url}
+                  alt="QRIS payment code"
+                  className="mx-auto mt-3 size-56 max-w-full rounded-lg"
+                />
+              </div>
+            )}
+            {selected !== "qris" && paymentAction && (
+              <a className="mt-3 inline-flex items-center gap-2 font-semibold text-primary" href={paymentAction.url} target="_blank" rel="noreferrer">
+                <WalletCards size={16} /> Open payment
+              </a>
+            )}
             <Link href={`/payment/result?orderId=${orderId}`} className="mt-4 block text-xs font-semibold text-primary">Check payment status</Link>
           </div>
         )}

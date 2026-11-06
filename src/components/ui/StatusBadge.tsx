@@ -3,6 +3,15 @@ import type { OrderStatus } from "@/store/useSwapStore";
 type Status = OrderStatus | "Submitted" | "Sorting" | "Passed" | "Not Eligible" | "Unsold" | "Accepted" | "Proposed";
 
 const styles: Record<Status, string> = {
+  PENDING_PAYMENT: "bg-warning/15 text-warning",
+  PAID: "bg-info/15 text-info",
+  PROCESSING: "bg-info/15 text-info",
+  SHIPPED: "bg-primary-soft/20 text-primary-dark",
+  DELIVERED: "bg-success/15 text-success",
+  COMPLETED: "bg-success/15 text-success",
+  CANCELLED: "bg-danger/15 text-danger",
+  EXPIRED: "bg-ink-muted/15 text-ink-muted",
+  REFUNDED: "bg-warning/15 text-warning",
   Processing: "bg-info/15 text-info",
   Shipped: "bg-primary-soft/20 text-primary-dark",
   "On the way": "bg-info/15 text-info",

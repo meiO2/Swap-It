@@ -3,7 +3,7 @@
 import { divIcon } from "leaflet";
 import { CircleMarker, MapContainer, Marker, TileLayer, Tooltip, useMap } from "react-leaflet";
 import { useEffect } from "react";
-import type { SwapHub } from "@/data/mock";
+import type { SwapHub } from "@/lib/hubs";
 
 export default function MapCanvas({ hubs, center }: { hubs: SwapHub[]; center: [number, number] }) {
   return (
