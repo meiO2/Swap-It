@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@zxing/browser": "^0.2.1",
     "bcryptjs": "^3.0.3",
     "framer-motion": "^14.7.1",
     "jose": "^6.2.15",
@@ -17,6 +18,7 @@
     "mongodb": "^7.8.0",
     "mongoose": "^9.11.4",
     "next": "16.4.3",
+    "qrcode": "^1.5.4",
     "qrcode.react": "^4.2.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
@@ -28,6 +30,7 @@
     "@tailwindcss/postcss": "^4.3.4",
     "@types/leaflet": "^1.9.22",
     "@types/node": "^20",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
