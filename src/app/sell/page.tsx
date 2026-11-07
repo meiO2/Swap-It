@@ -362,6 +362,7 @@ export default function SellPage() {
               <input
                 name="pickupDate"
                 type="date"
+                min={new Date().toLocaleDateString("en-CA")}
                 required
                 className="form-input"
               />

@@ -14,6 +14,10 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { formatRupiah } from "@/lib/format";
+import {
+  HandoverCard,
+  type HandoverEntry,
+} from "@/components/seller/HandoverScheduler";
 
 interface Product {
   _id: string;
@@ -42,6 +46,40 @@ export default function ProductDetail({ id }: { id: string }) {
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState("");
   const [isOwner, setIsOwner] = useState(false);
+  const [sellerHandover, setSellerHandover] =
+    useState<HandoverEntry | null>(null);
+
+  const [handoverError, setHandoverError] = useState("");
+
+  async function loadSellerHandover() {
+    try {
+      setHandoverError("");
+
+      const response = await fetch("/api/seller/handover", {
+        cache: "no-store",
+      });
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        throw new Error(
+          result.message || "Unable to load handover information.",
+        );
+      }
+
+      const matchingHandover = (
+        result.data as HandoverEntry[]
+      ).find((entry) => entry.item.productId === id);
+
+      setSellerHandover(matchingHandover ?? null);
+    } catch (err) {
+      setHandoverError(
+        err instanceof Error
+          ? err.message
+          : "Unable to load handover information.",
+      );
+    }
+  }
 
   useEffect(() => {
     let active = true;
@@ -89,8 +127,11 @@ export default function ProductDetail({ id }: { id: string }) {
               setIsOwner(owner);
             }
 
-            // Sellers should not need their own product in their cart.
-            if (owner) return;
+            // Load this product's active order handover for its seller.
+            if (owner) {
+              await loadSellerHandover();
+              return;
+            }
           }
         } catch {
           // Authentication lookup should not prevent public product viewing.
@@ -308,6 +349,58 @@ export default function ProductDetail({ id }: { id: string }) {
             </p>
           )}
         </section>
+
+        {isOwner && (
+          <section className="space-y-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-primary">
+                Seller Center
+              </p>
+
+              <h2 className="mt-1 text-lg font-semibold text-ink">
+                Handover management
+              </h2>
+
+              <p className="mt-1 text-sm text-ink-muted">
+                Manage the handover schedule for this product directly here.
+              </p>
+            </div>
+
+            {handoverError ? (
+              <div className="rounded-xl bg-red-50 p-3">
+                <p className="text-sm text-danger">
+                  {handoverError}
+                </p>
+
+                <button
+                  type="button"
+                  onClick={() => void loadSellerHandover()}
+                  className="mt-2 text-xs font-semibold text-primary"
+                >
+                  Try again
+                </button>
+              </div>
+            ) : sellerHandover ? (
+              <HandoverCard
+                entry={sellerHandover}
+                onScheduled={() => {
+                  void loadSellerHandover();
+                }}
+              />
+            ) : (
+              <div className="rounded-2xl border border-border bg-mint-50 p-4">
+                <p className="text-sm font-semibold text-ink">
+                  No active handover yet
+                </p>
+
+                <p className="mt-1 text-xs leading-relaxed text-ink-muted">
+                  Once someone purchases this product and payment is confirmed,
+                  its handover scheduling will appear here.
+                </p>
+              </div>
+            )}
+          </section>
+        )}
 
         {error && (
           <p className="rounded-xl bg-red-50 p-3 text-sm text-danger">

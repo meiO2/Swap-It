@@ -205,14 +205,32 @@ export function parseProductInput(
   }
 
   if (input.pickupDate !== undefined) {
-    if (
-      typeof input.pickupDate !== "string" ||
-      !Number.isFinite(Date.parse(`${input.pickupDate}T23:59:59`)) ||
-      Date.parse(`${input.pickupDate}T23:59:59`) < Date.now()
-    ) {
+    if (typeof input.pickupDate !== "string") {
       return {
         data: {},
-        error: "Choose a valid future pickup date.",
+        error: "Pickup date must be a valid date string.",
+      };
+    }
+
+    const today = new Date();
+    const todayString = [
+      today.getFullYear(),
+      String(today.getMonth() + 1).padStart(2, "0"),
+      String(today.getDate()).padStart(2, "0"),
+    ].join("-");
+
+    const isValidFormat = /^\d{4}-\d{2}-\d{2}$/.test(input.pickupDate);
+
+    const parsedDate = new Date(`${input.pickupDate}T00:00:00`);
+
+    const isRealDate =
+      !Number.isNaN(parsedDate.getTime()) &&
+      parsedDate.toISOString().startsWith(input.pickupDate);
+
+    if (!isValidFormat || !isRealDate || input.pickupDate < todayString) {
+      return {
+        data: {},
+        error: "Pickup date cannot be in the past.",
       };
     }
 
