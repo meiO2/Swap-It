@@ -49,36 +49,80 @@ async function canManageProduct(id: string) {
   return { success: true as const, auth, product };
 }
 
+
 export async function GET(
   _request: NextRequest,
   { params }: RouteContext,
 ) {
   try {
     await connectDB();
+
     const { id } = await params;
     await ensureMockDataSeeded();
 
-    const product = await Product.findOne({
-      ...(validateId(id) ? { _id: id } : { mockId: id }),
-      status: "AVAILABLE",
-    })
+    const product = await Product.findOne(
+      validateId(id)
+        ? { _id: id }
+        : { mockId: id },
+    )
       .populate("sellerId", "name")
       .lean();
+
     if (!product) {
       return NextResponse.json(
         { success: false, message: "Product not found." },
         { status: 404 },
       );
     }
-    return NextResponse.json({ success: true, data: product });
+
+    // Available products remain publicly accessible.
+    if (product.status !== "AVAILABLE") {
+      const auth = await requireAuth();
+
+      if (!auth.success) return auth.response;
+
+      const sellerId =
+        typeof product.sellerId === "object" &&
+        product.sellerId !== null &&
+        "_id" in product.sellerId
+          ? product.sellerId._id
+          : product.sellerId;
+
+      const isOwner = isProductOwner(
+        sellerId,
+        auth.user.id,
+      );
+
+      const isAdmin = auth.user.role === "ADMIN";
+
+      if (!isOwner && !isAdmin) {
+        return NextResponse.json(
+          {
+            success: false,
+            message: "You do not have permission to view this product.",
+          },
+          { status: 403 },
+        );
+      }
+    }
+
+    return NextResponse.json({
+      success: true,
+      data: product,
+    });
   } catch (error) {
     console.error("Get product error:", error);
+
     return NextResponse.json(
-      { success: false, message: "Failed to retrieve product." },
+      {
+        success: false,
+        message: "Failed to retrieve product.",
+      },
       { status: 500 },
     );
   }
 }
+
 
 export async function PATCH(
   request: NextRequest,

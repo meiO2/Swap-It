@@ -230,6 +230,8 @@ export async function POST(request: NextRequest) {
             handover: {
               method,
               status,
+              rescheduleCount: 0,
+              rescheduleHistory: [],
 
               ...(isPickup && product.pickupAddress
                 ? {

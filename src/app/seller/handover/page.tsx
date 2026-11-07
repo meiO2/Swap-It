@@ -24,6 +24,13 @@
     | "RECEIVED"
     | "CANCELLED";
 
+    type RescheduleRecord = {
+    previousScheduledAt: string;
+    newScheduledAt: string;
+    changedAt: string;
+    changedBy: string;
+    };
+
     type Handover = {
     method: HandoverMethod;
     status: HandoverStatus;
@@ -31,6 +38,8 @@
     hubName?: string;
     hubAddress?: string;
     scheduledAt?: string;
+    rescheduleCount?: number;
+    rescheduleHistory?: RescheduleRecord[];
     pickupAddress?: {
         name: string;
         phone: string;
@@ -53,8 +62,40 @@
     };
     };
 
+    const H24 = 24 * 60 * 60 * 1000;
+
     function getLocalDateString() {
     const date = new Date();
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+
+    return `${year}-${month}-${day}`;
+    }
+
+    function getLocalDateTimeString(value?: string) {
+    if (!value) return "";
+
+    const date = new Date(value);
+
+    if (Number.isNaN(date.getTime())) return "";
+
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    const hours = String(date.getHours()).padStart(2, "0");
+    const minutes = String(date.getMinutes()).padStart(2, "0");
+
+    return `${year}-${month}-${day}T${hours}:${minutes}`;
+    }
+
+    function getLocalDateOnly(value?: string) {
+    if (!value) return "";
+
+    const date = new Date(value);
+
+    if (Number.isNaN(date.getTime())) return "";
+
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, "0");
     const day = String(date.getDate()).padStart(2, "0");
@@ -99,31 +140,85 @@
     entry: HandoverEntry;
     onScheduled: () => void;
     }) {
-    const [selectedHub, setSelectedHub] = useState(
-        entry.item.handover.hubId ?? "",
-    );
-    const [preferredDate, setPreferredDate] = useState(
-        entry.item.handover.scheduledAt
-        ? entry.item.handover.scheduledAt.slice(0, 10)
-        : "",
-    );
-    const [pickupDateTime, setPickupDateTime] = useState(
-        entry.item.handover.scheduledAt
-        ? new Date(entry.item.handover.scheduledAt)
-            .toISOString()
-            .slice(0, 16)
-        : "",
-    );
-    const [saving, setSaving] = useState(false);
-    const [error, setError] = useState("");
-
     const handover = entry.item.handover;
     const isHubDropOff = handover.method === "HUB_DROP_OFF";
     const isScheduled = handover.status === "SCHEDULED";
 
+    const [selectedHub, setSelectedHub] = useState(
+        handover.hubId ?? "",
+    );
+
+    const [preferredDate, setPreferredDate] = useState(
+        getLocalDateOnly(handover.scheduledAt),
+    );
+
+    const [pickupDateTime, setPickupDateTime] = useState(
+        getLocalDateTimeString(handover.scheduledAt),
+    );
+
+    const [isRescheduling, setIsRescheduling] = useState(false);
+    const [saving, setSaving] = useState(false);
+    const [error, setError] = useState("");
+
+    const rescheduleCount = handover.rescheduleCount ?? 0;
+    const rescheduleHistory = handover.rescheduleHistory ?? [];
+
     const selectedHubDetails = swapHubs.find(
         (hub) => hub.id === selectedHub,
     );
+
+    const originalScheduledAt = handover.scheduledAt
+        ? new Date(handover.scheduledAt)
+        : null;
+
+    const hasValidOriginalSchedule =
+        originalScheduledAt !== null &&
+        !Number.isNaN(originalScheduledAt.getTime());
+
+    const hoursUntilSchedule = hasValidOriginalSchedule
+        ? originalScheduledAt.getTime() - Date.now()
+        : 0;
+
+    const canReschedule =
+        isScheduled &&
+        rescheduleCount < 1 &&
+        hasValidOriginalSchedule &&
+        hoursUntilSchedule >= H24;
+
+    const rescheduleUnavailableReason = !isScheduled
+        ? ""
+        : rescheduleCount >= 1
+        ? "You have already used your one-time reschedule."
+        : !hasValidOriginalSchedule
+            ? "The original schedule is unavailable."
+            : hoursUntilSchedule < H24
+            ? "Rescheduling is only available at least 24 hours before your scheduled handover."
+            : "";
+
+    function resetScheduleInputs() {
+        setPreferredDate(getLocalDateOnly(handover.scheduledAt));
+        setPickupDateTime(
+        getLocalDateTimeString(handover.scheduledAt),
+        );
+        setError("");
+    }
+
+    function getScheduledDate() {
+        if (isHubDropOff) {
+        if (!preferredDate) return null;
+
+        // Hub drop-off is date-based. Noon is used as its timestamp.
+        const [year, month, day] = preferredDate
+            .split("-")
+            .map(Number);
+
+        return new Date(year, month - 1, day, 12, 0, 0);
+        }
+
+        if (!pickupDateTime) return null;
+
+        return new Date(pickupDateTime);
+    }
 
     async function handleSchedule() {
         setError("");
@@ -143,13 +238,13 @@
         return;
         }
 
-        // Hub drop-off is date-based, not appointment-based.
-        // Noon is used internally as the timestamp for the selected date.
-        const scheduledAt = isHubDropOff
-        ? new Date(`${preferredDate}T12:00:00`).toISOString()
-        : new Date(pickupDateTime).toISOString();
+        const scheduledDate = getScheduledDate();
 
-        if (new Date(scheduledAt) <= new Date()) {
+        if (
+        !scheduledDate ||
+        Number.isNaN(scheduledDate.getTime()) ||
+        scheduledDate.getTime() <= Date.now()
+        ) {
         setError("Please choose a future date and time.");
         return;
         }
@@ -161,7 +256,7 @@
             method: "PATCH",
             body: JSON.stringify({
             productId: entry.item.productId,
-            scheduledAt,
+            scheduledAt: scheduledDate.toISOString(),
             ...(isHubDropOff ? { hubId: selectedHub } : {}),
             }),
         });
@@ -172,6 +267,73 @@
             err instanceof Error
             ? err.message
             : "Unable to save your handover schedule.",
+        );
+        } finally {
+        setSaving(false);
+        }
+    }
+
+    async function handleReschedule() {
+        setError("");
+
+        if (!canReschedule) {
+        setError(
+            rescheduleUnavailableReason ||
+            "This handover cannot be rescheduled.",
+        );
+        return;
+        }
+
+        if (isHubDropOff && !preferredDate) {
+        setError("Please select your new drop-off date.");
+        return;
+        }
+
+        if (!isHubDropOff && !pickupDateTime) {
+        setError("Please select your new pickup date and time.");
+        return;
+        }
+
+        const newScheduledDate = getScheduledDate();
+
+        if (
+        !newScheduledDate ||
+        Number.isNaN(newScheduledDate.getTime()) ||
+        newScheduledDate.getTime() <= Date.now()
+        ) {
+        setError("Please choose a future date and time.");
+        return;
+        }
+
+        if (
+        newScheduledDate.getTime() ===
+        originalScheduledAt?.getTime()
+        ) {
+        setError("Please choose a different date or time.");
+        return;
+        }
+
+        setSaving(true);
+
+        try {
+        await apiRequest(
+            `/api/orders/${entry.orderId}/handover/reschedule`,
+            {
+            method: "PATCH",
+            body: JSON.stringify({
+                productId: entry.item.productId,
+                scheduledAt: newScheduledDate.toISOString(),
+            }),
+            },
+        );
+
+        setIsRescheduling(false);
+        onScheduled();
+        } catch (err) {
+        setError(
+            err instanceof Error
+            ? err.message
+            : "Unable to reschedule your handover.",
         );
         } finally {
         setSaving(false);
@@ -235,31 +397,34 @@
         <div className="border-t border-border bg-[#FAFCFA] p-4">
             {isHubDropOff ? (
             <div className="space-y-4">
+                {!isScheduled && (
                 <div>
-                <label
+                    <label
                     htmlFor={`hub-${entry.item.productId}`}
                     className="mb-2 block text-sm font-medium text-ink"
-                >
+                    >
                     Choose your Swap Hub
-                </label>
+                    </label>
 
-                <select
+                    <select
                     id={`hub-${entry.item.productId}`}
                     value={selectedHub}
-                    onChange={(event) => setSelectedHub(event.target.value)}
-                    disabled={isScheduled}
+                    onChange={(event) =>
+                        setSelectedHub(event.target.value)
+                    }
                     className="h-11 w-full rounded-xl border border-border bg-white px-3 text-sm text-ink outline-none focus:border-primary"
-                >
+                    >
                     <option value="">Select a location</option>
                     {swapHubs.map((hub) => (
-                    <option key={hub.id} value={hub.id}>
+                        <option key={hub.id} value={hub.id}>
                         {hub.name}
-                    </option>
+                        </option>
                     ))}
-                </select>
+                    </select>
                 </div>
+                )}
 
-                {selectedHubDetails && (
+                {selectedHubDetails && !isScheduled && (
                 <div className="rounded-xl border border-border bg-white p-3">
                     <p className="text-sm font-medium text-ink">
                     {selectedHubDetails.name}
@@ -282,30 +447,52 @@
                 </div>
                 )}
 
+                {isScheduled && handover.hubName && (
+                <div className="rounded-xl border border-border bg-white p-3">
+                    <p className="text-sm font-medium text-ink">
+                    {handover.hubName}
+                    </p>
+                    {handover.hubAddress && (
+                    <p className="mt-1 text-sm text-ink-muted">
+                        {handover.hubAddress}
+                    </p>
+                    )}
+                    <p className="mt-2 text-xs font-medium text-primary">
+                    Drop box available 24/7
+                    </p>
+                </div>
+                )}
+
+                {(!isScheduled || isRescheduling) && (
                 <div>
-                <label
+                    <label
                     htmlFor={`date-${entry.item.productId}`}
                     className="mb-2 flex items-center gap-2 text-sm font-medium text-ink"
-                >
+                    >
                     <CalendarDays size={16} />
-                    Preferred drop-off date
-                </label>
+                    {isRescheduling
+                        ? "New drop-off date"
+                        : "Preferred drop-off date"}
+                    </label>
 
-                <input
+                    <input
                     id={`date-${entry.item.productId}`}
                     type="date"
                     min={getLocalDateString()}
                     value={preferredDate}
-                    onChange={(event) => setPreferredDate(event.target.value)}
-                    disabled={isScheduled}
+                    onChange={(event) =>
+                        setPreferredDate(event.target.value)
+                    }
                     className="h-11 w-full rounded-xl border border-border bg-white px-3 text-sm text-ink outline-none focus:border-primary"
-                />
+                    />
 
-                <p className="mt-2 text-xs text-ink-muted">
-                    No appointment time is required. You can drop off your item
-                    during the host location&apos;s accessible hours.
-                </p>
+                    <p className="mt-2 text-xs text-ink-muted">
+                    No appointment time is required. You can drop off
+                    your item during the host location&apos;s accessible
+                    hours.
+                    </p>
                 </div>
+                )}
             </div>
             ) : (
             <div className="space-y-3">
@@ -330,25 +517,30 @@
                 </div>
                 )}
 
+                {(!isScheduled || isRescheduling) && (
                 <div>
-                <label
+                    <label
                     htmlFor={`pickup-${entry.item.productId}`}
                     className="mb-2 flex items-center gap-2 text-sm font-medium text-ink"
-                >
+                    >
                     <Clock3 size={16} />
-                    Preferred pickup date and time
-                </label>
+                    {isRescheduling
+                        ? "New pickup date and time"
+                        : "Preferred pickup date and time"}
+                    </label>
 
-                <input
+                    <input
                     id={`pickup-${entry.item.productId}`}
                     type="datetime-local"
-                    min={getLocalDateString() + "T00:00"}
+                    min={getLocalDateTimeString(new Date().toISOString())}
                     value={pickupDateTime}
-                    onChange={(event) => setPickupDateTime(event.target.value)}
-                    disabled={isScheduled}
+                    onChange={(event) =>
+                        setPickupDateTime(event.target.value)
+                    }
                     className="h-11 w-full rounded-xl border border-border bg-white px-3 text-sm text-ink outline-none focus:border-primary"
-                />
+                    />
                 </div>
+                )}
             </div>
             )}
 
@@ -366,6 +558,75 @@
             </div>
             )}
 
+            {isScheduled && rescheduleHistory.length > 0 && (
+            <div className="mt-4 rounded-xl border border-border bg-white p-3">
+                <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-ink">
+                <RefreshCw size={16} />
+                Reschedule history
+                </div>
+
+                <div className="space-y-3">
+                {rescheduleHistory.map((record, index) => (
+                    <div
+                    key={`${record.changedAt}-${index}`}
+                    className="border-l-2 border-primary pl-3"
+                    >
+                    <p className="text-xs text-ink-muted">
+                        Changed on {formatDateTime(record.changedAt)}
+                    </p>
+                    <p className="mt-1 text-sm text-ink-muted">
+                        Previous:{" "}
+                        {isHubDropOff
+                        ? formatDate(record.previousScheduledAt)
+                        : formatDateTime(record.previousScheduledAt)}
+                    </p>
+                    <p className="mt-1 text-sm font-medium text-ink">
+                        New:{" "}
+                        {isHubDropOff
+                        ? formatDate(record.newScheduledAt)
+                        : formatDateTime(record.newScheduledAt)}
+                    </p>
+                    </div>
+                ))}
+                </div>
+            </div>
+            )}
+
+            {isScheduled && !isRescheduling && (
+            <div className="mt-4">
+                {canReschedule ? (
+                <button
+                    type="button"
+                    onClick={() => {
+                    resetScheduleInputs();
+                    setIsRescheduling(true);
+                    }}
+                    className="flex h-11 w-full items-center justify-center gap-2 rounded-full border border-primary bg-white px-5 text-sm font-semibold text-primary transition hover:bg-mint-50"
+                >
+                    <RefreshCw size={16} />
+                    Reschedule handover
+                </button>
+                ) : (
+                <p className="text-xs leading-relaxed text-ink-muted">
+                    {rescheduleUnavailableReason}
+                </p>
+                )}
+            </div>
+            )}
+
+            {isRescheduling && (
+            <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3">
+                <p className="text-sm font-medium text-amber-900">
+                One-time rescheduling
+                </p>
+                <p className="mt-1 text-xs leading-relaxed text-amber-800">
+                You can only change this schedule once, and the request
+                must be made at least 24 hours before your original
+                scheduled handover.
+                </p>
+            </div>
+            )}
+
             {error && (
             <p role="alert" className="mt-3 text-sm text-danger">
                 {error}
@@ -379,9 +640,39 @@
                 disabled={saving}
                 className="mt-4 flex h-11 w-full items-center justify-center gap-2 rounded-full bg-primary px-5 text-sm font-semibold text-white transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
             >
-                {saving && <RefreshCw size={16} className="animate-spin" />}
+                {saving && (
+                <RefreshCw size={16} className="animate-spin" />
+                )}
                 {saving ? "Saving schedule..." : "Confirm handover schedule"}
             </button>
+            )}
+
+            {isRescheduling && (
+            <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                <button
+                type="button"
+                onClick={() => {
+                    setIsRescheduling(false);
+                    resetScheduleInputs();
+                }}
+                disabled={saving}
+                className="h-11 flex-1 rounded-full border border-border bg-white px-5 text-sm font-semibold text-ink transition hover:bg-gray-50 disabled:opacity-60"
+                >
+                Cancel
+                </button>
+
+                <button
+                type="button"
+                onClick={handleReschedule}
+                disabled={saving}
+                className="flex h-11 flex-1 items-center justify-center gap-2 rounded-full bg-primary px-5 text-sm font-semibold text-white transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                {saving && (
+                    <RefreshCw size={16} className="animate-spin" />
+                )}
+                {saving ? "Updating schedule..." : "Confirm new schedule"}
+                </button>
+            </div>
             )}
         </div>
         </article>
@@ -427,8 +718,8 @@
                 Handover scheduling
             </h1>
             <p className="mt-2 text-sm leading-relaxed text-ink-muted">
-                Arrange how and when your sold items will be handed over to
-                SwapIt for quality inspection.
+                Arrange how and when your sold items will be handed over
+                to SwapIt for quality inspection.
             </p>
             </div>
 
@@ -442,9 +733,9 @@
                     What happens next?
                 </p>
                 <p className="mt-1 text-sm leading-relaxed text-ink-muted">
-                    After scheduling, hand over your item using the selected
-                    method. SwapIt will record receipt and proceed with quality
-                    inspection.
+                    After scheduling, hand over your item using the
+                    selected method. SwapIt will record receipt and proceed
+                    with quality inspection.
                 </p>
                 </div>
             </div>
@@ -475,8 +766,8 @@
                 No handovers to schedule
                 </h2>
                 <p className="mt-2 text-sm text-ink-muted">
-                Items from your paid orders will appear here when they are
-                ready for handover scheduling.
+                Items from your paid orders will appear here when they
+                are ready for handover scheduling.
                 </p>
             </div>
             ) : (

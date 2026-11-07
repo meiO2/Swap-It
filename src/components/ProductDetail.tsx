@@ -41,6 +41,7 @@ export default function ProductDetail({ id }: { id: string }) {
   const [added, setAdded] = useState(false);
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState("");
+  const [isOwner, setIsOwner] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -62,23 +63,64 @@ export default function ProductDetail({ id }: { id: string }) {
           );
         }
 
-        if (active) {
-          setProduct(result.data);
-          try {
-            const cartResponse = await fetch("/api/cart", { cache: "no-store" });
-            if (cartResponse.ok) {
-              const cartResult = await cartResponse.json();
-              const inCart = cartResult.success && cartResult.data?.items?.some(
+        if (!active) return;
+
+        const productData = result.data as Product;
+        setProduct(productData);
+
+        // Identify the currently authenticated user.
+        try {
+          const authResponse = await fetch("/api/auth/me", {
+            cache: "no-store",
+          });
+
+          if (authResponse.ok) {
+            const authResult = await authResponse.json();
+            const currentUserId = authResult.data?.id;
+
+            const productSellerId =
+              typeof productData.sellerId === "string"
+                ? productData.sellerId
+                : productData.sellerId?._id;
+
+            const owner = currentUserId === productSellerId;
+
+            if (active) {
+              setIsOwner(owner);
+            }
+
+            // Sellers should not need their own product in their cart.
+            if (owner) return;
+          }
+        } catch {
+          // Authentication lookup should not prevent public product viewing.
+        }
+
+        if (!active) return;
+
+        // Check whether the product is already in the buyer's cart.
+        try {
+          const cartResponse = await fetch("/api/cart", {
+            cache: "no-store",
+          });
+
+          if (cartResponse.ok) {
+            const cartResult = await cartResponse.json();
+
+            const inCart = cartResult.success &&
+              cartResult.data?.items?.some(
                 (item: { productId?: { _id?: string } | string }) =>
                   typeof item.productId === "string"
-                    ? item.productId === result.data._id
-                    : item.productId?._id === result.data._id,
+                    ? item.productId === productData._id
+                    : item.productId?._id === productData._id,
               );
+
+            if (active) {
               setAdded(Boolean(inCart));
             }
-          } catch {
-            // Cart availability should not prevent the product from loading.
           }
+        } catch {
+          // Cart availability should not prevent the product from loading.
         }
       } catch (err) {
         if (active) {

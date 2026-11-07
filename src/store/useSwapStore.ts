@@ -38,19 +38,6 @@ export type DonationReceipt = {
   createdAt: string;
 };
 export type ChatMessage = { id: number; text: string; own: boolean; time: string };
-export type Listing = {
-  id: string;
-  title: string;
-  category: string;
-  size: string;
-  condition: string;
-  price: number;
-  status: "Submitted" | "Sorting" | "Passed" | "Not Eligible" | "Unsold";
-  createdAt: string;
-  fulfillment: "Swap Hub drop-off" | "Pickup";
-  pickupDate?: string;
-  pickupChanges: number;
-};
 
 type SwapStore = {
   pointBatches: PointBatch[];
@@ -59,7 +46,6 @@ type SwapStore = {
   donationReceipts: DonationReceipt[];
   cart: CartItem[];
   orders: SwapOrder[];
-  listings: Listing[];
   messagesByChat: Record<string, ChatMessage[]>;
   swapStatuses: Record<string, "Proposed" | "Accepted" | "Completed">;
   addToCart: (productId: string) => void;
@@ -78,9 +64,6 @@ type SwapStore = {
   addPoints: (amount: number, label: string) => void;
   addDonationReward: (id: string, itemCount: number, amount: number, earnedAt: Date) => void;
   rejectQcOrder: (id: string) => void;
-  addListing: (listing: Omit<Listing, "id" | "createdAt" | "status" | "pickupChanges">) => void;
-  updateListingStatus: (id: string, status: Listing["status"]) => void;
-  changePickupDate: (id: string, pickupDate: string) => void;
   sendChatMessage: (chatId: string, text: string) => void;
   updateSwapStatus: (chatId: string, status: "Proposed" | "Accepted" | "Completed") => void;
 };
@@ -96,7 +79,6 @@ export const useSwapStore = create<SwapStore>()(
       donationReceipts: [],
       cart: [],
       orders: [],
-      listings: [],
       messagesByChat: {},
       swapStatuses: {},
       addToCart: (productId) => set((state) => {
@@ -360,29 +342,7 @@ export const useSwapStore = create<SwapStore>()(
           transactions: [{ id: `tx-qc-${id}`, kind: "refund", amount: refund, label: "QC rejection — product value refund", createdAt: earnedAt.toISOString() }, ...state.transactions],
         };
       }),
-      addListing: (listing) => {
-        if (listing.fulfillment === "Pickup" && (!listing.pickupDate || Date.parse(`${listing.pickupDate}T23:59:59`) < Date.now())) {
-          throw new RangeError("Choose a future pickup date.");
-        }
-        set((state) => ({
-          listings: [{ ...listing, id: `listing-${Date.now()}`, status: "Submitted", createdAt: new Date().toISOString(), pickupChanges: 0 }, ...state.listings],
-        }));
-      },
-      updateListingStatus: (id, status) => set((state) => ({
-        listings: state.listings.map((listing) => listing.id === id ? { ...listing, status } : listing),
-      })),
-      changePickupDate: (id, pickupDate) => {
-        const listing = get().listings.find((item) => item.id === id);
-        const scheduledStart = listing?.pickupDate ? new Date(`${listing.pickupDate}T00:00:00`).getTime() : Number.NaN;
-        if (!listing || listing.fulfillment !== "Pickup" || listing.pickupChanges > 0 || !Number.isFinite(scheduledStart) || scheduledStart - Date.now() < 24 * 60 * 60 * 1000) {
-          throw new RangeError("A pickup schedule can only be changed once, no later than one day before pickup.");
-        }
-        const pickupDayEnd = pickupDate ? new Date(`${pickupDate}T23:59:59`).getTime() : Number.NaN;
-        if (!Number.isFinite(pickupDayEnd) || pickupDayEnd < Date.now()) throw new RangeError("Choose a future pickup date.");
-        set((state) => ({
-          listings: state.listings.map((item) => item.id === id ? { ...item, pickupDate, pickupChanges: 1 } : item),
-        }));
-      },
+
       sendChatMessage: (chatId, text) => {
         const message = text.trim();
         if (!message) return;

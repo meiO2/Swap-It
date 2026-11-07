@@ -57,25 +57,31 @@ export type ItemQCStatus =
 
 export type BuyerQCDecision = "ACCEPT" | "REJECT";
 
+export interface IHandoverReschedule {
+  previousScheduledAt: Date;
+  newScheduledAt: Date;
+  changedAt: Date;
+  changedBy: mongoose.Types.ObjectId;
+}
 
 export interface IOrderHandover {
   method: HandoverMethod;
   status: HandoverStatus;
 
-  // Selected by seller after purchase.
   hubId?: string;
   hubName?: string;
   hubAddress?: string;
 
-  // Seller's requested pickup/drop-off date and time.
   scheduledAt?: Date;
-
-  // Snapshot of the seller's pickup address.
   pickupAddress?: IOrderAddress;
 
   requestedAt?: Date;
   receivedAt?: Date;
   receivedBy?: mongoose.Types.ObjectId;
+
+  // Rescheduling
+  rescheduleCount: number;
+  rescheduleHistory: IHandoverReschedule[];
 }
 
 
@@ -134,6 +140,31 @@ const AddressSchema = new Schema<IOrderAddress>(
   { _id: false },
 );
 
+const HandoverRescheduleSchema =
+  new Schema<IHandoverReschedule>(
+    {
+      previousScheduledAt: {
+        type: Date,
+        required: true,
+      },
+      newScheduledAt: {
+        type: Date,
+        required: true,
+      },
+      changedAt: {
+        type: Date,
+        required: true,
+        default: Date.now,
+      },
+      changedBy: {
+        type: Schema.Types.ObjectId,
+        ref: "User",
+        required: true,
+      },
+    },
+    { _id: false },
+  );
+
 const HandoverSchema = new Schema<IOrderHandover>(
   {
     method: {
@@ -162,6 +193,17 @@ const HandoverSchema = new Schema<IOrderHandover>(
     requestedAt: { type: Date },
     receivedAt: { type: Date },
     receivedBy: { type: Schema.Types.ObjectId, ref: "User" },
+    rescheduleCount: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 1,
+    },
+
+    rescheduleHistory: {
+      type: [HandoverRescheduleSchema],
+      default: [],
+    },
   },
   { _id: false },
 );

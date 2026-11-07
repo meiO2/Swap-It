@@ -1,9 +1,10 @@
 
 import { NextResponse } from "next/server";
+
 import { requireRole } from "@/lib/authorization";
 import { connectDB } from "@/lib/mongodb";
+
 import Order from "@/models/Order";
-import Listing from "@/models/Listing";
 import Product from "@/models/Product";
 import QCAssessment from "@/models/QCAssessment";
 
@@ -15,21 +16,13 @@ export async function GET() {
   try {
     await connectDB();
 
-    // Find orders currently being processed.
     const orders = await Order.find({
       status: "PROCESSING",
     })
       .sort({ createdAt: 1 })
       .lean();
 
-    // Find listings awaiting inspection.
-    const listings = await Listing.find({
-      status: { $in: ["Submitted", "Sorting"] },
-    })
-      .sort({ createdAt: 1 })
-      .lean();
-
-    // Collect product IDs from received hub handovers.
+    // Only received Swap Hub drop-offs are eligible for QC.
     const orderItems = orders.flatMap((order) =>
       order.items
         .filter(
@@ -50,10 +43,16 @@ export async function GET() {
 
     const productIds = orderItems.map((item) => item.productId);
 
-    // Fetch actual product information.
-    const products = await Product.find({
-      _id: { $in: productIds },
-    }).lean();
+    const [products, assessments] = await Promise.all([
+      Product.find({
+        _id: { $in: productIds },
+      }).lean(),
+
+      QCAssessment.find({
+        entityType: "order",
+        entityId: { $in: orders.map((order) => order._id) },
+      }).lean(),
+    ]);
 
     const productMap = new Map(
       products.map((product) => [
@@ -62,21 +61,8 @@ export async function GET() {
       ]),
     );
 
-    // Exclude products and listings that already have QC assessments.
-    const [orderAssessments, listingAssessments] = await Promise.all([
-      QCAssessment.find({
-        entityType: "order",
-        entityId: { $in: orders.map((order) => order._id) },
-      }).lean(),
-
-      QCAssessment.find({
-        entityType: "listing",
-        entityId: { $in: listings.map((listing) => listing._id) },
-      }).lean(),
-    ]);
-
     const reviewedProducts = new Set(
-      orderAssessments
+      assessments
         .filter((assessment) => assessment.productId)
         .map(
           (assessment) =>
@@ -84,14 +70,7 @@ export async function GET() {
         ),
     );
 
-    const reviewedListings = new Set(
-      listingAssessments.map((assessment) =>
-        String(assessment.entityId),
-      ),
-    );
-
-    // Build one QC queue entry per received product.
-    const orderQueue = orderItems
+    const data = orderItems
       .filter(
         (item) =>
           !reviewedProducts.has(
@@ -122,31 +101,12 @@ export async function GET() {
             scheduledAt: item.handover?.scheduledAt,
           },
         };
-      });
-
-    const listingQueue = listings
-      .filter(
-        (listing) => !reviewedListings.has(String(listing._id)),
-      )
-      .map((listing) => ({
-        type: "listing" as const,
-        id: String(listing._id),
-        createdAt: listing.createdAt,
-        category: listing.category,
-        title: listing.title,
-        image: listing.image,
-        size: listing.size,
-        condition: listing.condition,
-        description: listing.description,
-        value: listing.price,
-        fulfillment: listing.fulfillment,
-      }));
-
-    const data = [...orderQueue, ...listingQueue].sort(
-      (a, b) =>
-        new Date(a.createdAt ?? 0).getTime() -
-        new Date(b.createdAt ?? 0).getTime(),
-    );
+      })
+      .sort(
+        (a, b) =>
+          new Date(a.createdAt ?? 0).getTime() -
+          new Date(b.createdAt ?? 0).getTime(),
+      );
 
     return NextResponse.json({
       success: true,

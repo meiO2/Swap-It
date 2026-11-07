@@ -2,14 +2,13 @@
 import mongoose, { Schema, type Model } from "mongoose";
 
 export interface IQCAssessment {
-  entityType: "order" | "listing";
+  entityType: "order";
 
-  // Order ID or Listing ID
+  // Order ID. An order may contain multiple products.
   entityId: mongoose.Types.ObjectId;
 
-  // Required for order assessments because an order
-  // can contain multiple products.
-  productId?: mongoose.Types.ObjectId;
+  // Identifies the specific product within the order.
+  productId: mongoose.Types.ObjectId;
 
   reviewerId: mongoose.Types.ObjectId;
 
@@ -32,19 +31,21 @@ const QCAssessmentSchema = new Schema<IQCAssessment>(
   {
     entityType: {
       type: String,
-      enum: ["order", "listing"],
+      enum: ["order"],
       required: true,
     },
 
     entityId: {
       type: Schema.Types.ObjectId,
       required: true,
+      ref: "Order",
       index: true,
     },
 
     productId: {
       type: Schema.Types.ObjectId,
       ref: "Product",
+      required: true,
     },
 
     reviewerId: {
@@ -92,11 +93,10 @@ const QCAssessmentSchema = new Schema<IQCAssessment>(
   },
 );
 
-QCAssessmentSchema.index({
-  entityType: 1,
-  entityId: 1,
-  productId: 1,
-});
+QCAssessmentSchema.index(
+  { entityId: 1, productId: 1 },
+  { unique: true },
+);
 
 const QCAssessment: Model<IQCAssessment> =
   mongoose.models.QCAssessment ||
