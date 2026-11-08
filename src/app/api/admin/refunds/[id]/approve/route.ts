@@ -1,0 +1,5 @@
+import { NextRequest, NextResponse } from "next/server";
+import { requireRole } from "@/lib/authorization";
+import { connectDB } from "@/lib/mongodb";
+import { approveRefund, serializeRefund } from "@/lib/refunds";
+export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) { const auth = await requireRole(["ADMIN"]); if (!auth.success) return auth.response; try { const { id } = await params; const body = await request.json().catch(() => ({})); await connectDB(); const refund = await approveRefund(id, auth.user.id, typeof body.note === "string" ? body.note.slice(0, 2000) : ""); if (!refund) return NextResponse.json({ success: false, message: "This request is no longer awaiting review." }, { status: 409 }); return NextResponse.json({ success: true, data: serializeRefund(refund.toObject()) }); } catch (error) { return NextResponse.json({ success: false, message: error instanceof Error ? error.message : "Could not approve refund." }, { status: 500 }); } }

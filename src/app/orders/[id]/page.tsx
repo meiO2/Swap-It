@@ -28,6 +28,7 @@ function OrderDetailsContent() {
   const [helpOpen, setHelpOpen] = useState(false);
   const [error, setError] = useState("");
   const [cancelling, setCancelling] = useState(false);
+  const [qcSaving, setQcSaving] = useState(false);
   const product = useMemo(() => order?.items[0] ? catalogProducts.find((item) => item.id === order.items[0].productId) : undefined, [order]);
   const latestEvent = order?.trackingEvents?.slice().sort((a, b) => Date.parse(b.at) - Date.parse(a.at))[0];
   useEffect(() => {
@@ -69,6 +70,11 @@ function OrderDetailsContent() {
     } finally {
       setCancelling(false);
     }
+  }
+  async function decideQc(productId: string, decision: "ACCEPT" | "REJECT") {
+    if (!order || qcSaving) return;
+    if (!window.confirm(decision === "REJECT" ? "Reject this product? You will receive 100% of the product value in Green Points." : "Accept this product and continue shipping without cashback?")) return;
+    try { setQcSaving(true); setError(""); await apiRequest<{ qcStatus: string; refundAmount: number }>(`/api/orders/${encodeURIComponent(order.id)}/qc-decision`, { method: "POST", body: JSON.stringify({ productId, decision }) }); setNotice(decision === "REJECT" ? "Refund initiated. The full product value will be returned as Green Points." : "Your choice was recorded. The product will continue to shipping."); await apiRequest<OrderShape>(`/api/orders/${encodeURIComponent(id)}`).then(setOrder); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not save your decision."); } finally { setQcSaving(false); }
   }
 
   if (!ready) return <main className="min-h-dvh px-4 py-8 text-center text-sm text-ink-muted">Loading order…</main>;
@@ -128,6 +134,7 @@ function OrderDetailsContent() {
           <p className="mt-3 text-xs leading-relaxed text-ink-muted">Buyer keep/refund actions are not available: shipment and Green Point refund APIs are not implemented. No refund will be implied or recorded by this page.</p>
         </section>
       )}
+      {viewOrder.items.some((item) => "qcStatus" in item && item.qcStatus === "FAILED_AWAITING_BUYER") && <section className="rounded-3xl border border-danger/20 bg-danger/5 p-4"><h2 className="text-sm font-bold text-danger">Official QC report: major damage found</h2><p className="mt-2 text-xs leading-relaxed text-ink-muted">Our quality team found that this item does not meet the listing quality standard. Review the item documentation above and choose within three days.</p><p className="mt-3 text-xs font-semibold text-ink">If rejected, the product value is returned to its original sources: GP as GP and cash to the original payment method. Shipping and service fees are handled separately.</p><div className="mt-3 grid gap-2 sm:grid-cols-2">{viewOrder.items.filter((item) => "qcStatus" in item && item.qcStatus === "FAILED_AWAITING_BUYER").map((item) => <><button key={`${item.productId}-accept`} disabled={qcSaving} onClick={() => void decideQc(item.productId, "ACCEPT")} className="min-h-11 rounded-full border border-primary/40 text-xs font-semibold text-primary disabled:opacity-60">Accept product — continue shipping</button><button key={`${item.productId}-reject`} disabled={qcSaving} onClick={() => void decideQc(item.productId, "REJECT")} className="min-h-11 rounded-full bg-danger text-xs font-semibold text-white disabled:opacity-60">Reject — refund to original source</button></>)}</div></section>}
 
       <section className="rounded-3xl bg-white p-3 shadow-card">
         <OrderTimeline order={viewOrder} />

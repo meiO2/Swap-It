@@ -5,6 +5,8 @@
     import { requireAuth } from "@/lib/authorization";
     import { connectDB } from "@/lib/mongodb";
     import Order from "@/models/Order";
+    import Notification from "@/models/Notification";
+    import { createQcCompensation } from "@/lib/refunds";
 
     type RouteContext = {
     params: Promise<{ id: string }>;
@@ -119,12 +121,24 @@
 
         await order.save();
 
+        if (input.decision === "REJECT") {
+          await createQcCompensation({ orderId: id, userId: auth.user.id, productId: input.productId });
+          await Notification.create({
+            recipientId: auth.user.id,
+            type: "QC_UPDATE",
+            title: "QC rejection refund processed",
+            message: `Your rejection was recorded. ${item.price.toLocaleString("id-ID")} GP will be credited as compensation.`,
+            link: `/orders/${order._id.toString()}`,
+            isRead: false,
+          });
+        }
+
         return NextResponse.json({
         success: true,
         message:
             input.decision === "ACCEPT"
             ? "You accepted the product. It can proceed to shipping."
-            : "Your rejection has been recorded. The refund workflow must now be coordinated.",
+            : "Your rejection has been recorded. Refunds are being processed to the original payment sources.",
         data: {
             orderId: order._id.toString(),
             productId: item.productId.toString(),

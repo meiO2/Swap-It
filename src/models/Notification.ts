@@ -20,6 +20,8 @@
     link?: string | null;
     isRead: boolean;
     readAt?: Date | null;
+    createdAt?: Date;
+    updatedAt?: Date;
     }
 
     const NotificationSchema = new Schema<INotification>(

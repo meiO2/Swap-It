@@ -88,6 +88,20 @@ export async function getMidtransTransactionStatus(orderId: string) {
   return payload;
 }
 
+export async function refundMidtransTransaction(input: { orderId: string; refundKey: string; amount: number; reason: string }) {
+  const config = getConfig();
+  const authorization = Buffer.from(`${config.serverKey}:`).toString("base64");
+  const response = await fetch(`${config.apiBaseUrl}/v2/${encodeURIComponent(input.orderId)}/refund`, {
+    method: "POST",
+    headers: { Accept: "application/json", Authorization: `Basic ${authorization}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ refund_key: input.refundKey, amount: input.amount, reason: input.reason }),
+    cache: "no-store",
+  });
+  const payload = (await response.json().catch(() => null)) as { status_code?: string; refund_key?: string; status_message?: string } | null;
+  if (!response.ok || !payload || !String(payload.status_code ?? "").startsWith("2")) throw new Error(payload?.status_message ?? "Midtrans refund request failed.");
+  return payload;
+}
+
 export async function createSnapTransaction(input: {
   orderId: string;
   grossAmount: number;

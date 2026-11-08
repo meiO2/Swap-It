@@ -4,12 +4,25 @@ import Link from "next/link";
 import { ArrowLeft, Bell, Leaf, PackageCheck, ShieldAlert, Sparkles, WalletCards } from "lucide-react";
 import { useSwapStore } from "@/store/useSwapStore";
 import { formatShortDate } from "@/lib/format";
+import { apiRequest } from "@/lib/api";
+import { useEffect, useState } from "react";
 
 const icons = { wallet: WalletCards, order: PackageCheck, qc: ShieldAlert, match: Sparkles, donation: Leaf };
+type ServerNotification = { id: string; title: string; detail: string; createdAt: string; href: string; kind: "qc" | "order" };
 
 export default function NotificationsPage() {
   const donationNotifications = useSwapStore((state) => state.notifications);
+  const [serverNotifications, setServerNotifications] = useState<ServerNotification[]>([]);
+  useEffect(() => {
+    void apiRequest<ServerNotification[]>("/api/notifications")
+      .then(setServerNotifications)
+      .catch((error: unknown) => console.error("Could not load notifications.", error));
+  }, []);
   const allNotifications = [
+    ...serverNotifications.map((notification) => ({
+      ...notification,
+      time: formatShortDate(notification.createdAt),
+    })),
     ...donationNotifications.map((notification) => ({
       ...notification,
       time: formatShortDate(notification.createdAt),
