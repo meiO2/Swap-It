@@ -3,7 +3,17 @@
   import Link from "next/link";
   import { useState, type ReactNode } from "react";
   import { usePathname, useRouter } from "next/navigation";
-  import { Gift, LayoutDashboard, Menu, Newspaper, PackageCheck, ShieldCheck, X, RotateCcw } from "lucide-react";
+  import {
+    Gift,
+    LayoutDashboard,
+    Menu,
+    Newspaper,
+    PackageCheck,
+    ShieldCheck,
+    X,
+    RotateCcw,
+    RadioTower,
+  } from "lucide-react";
   import { useAuth, type AuthUser } from "@/components/auth/AuthProvider";
 
   const links = [
@@ -11,6 +21,7 @@
     { href: "/admin/qc", label: "Quality Control", Icon: ShieldCheck, adminOnly: false },
     { href: "/admin/refunds", label: "Refunds", Icon: RotateCcw, adminOnly: false },
     { href: "/admin/donations", label: "Donation GP", Icon: Gift, adminOnly: false },
+    { href: "/admin/hubs", label: "Swap Hub", Icon: RadioTower, adminOnly: true },
     { href: "/admin/revamp", label: "Revamp! Merchandise", Icon: PackageCheck, adminOnly: true },
     { href: "/admin/news", label: "News", Icon: Newspaper, adminOnly: true },
   ];

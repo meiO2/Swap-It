@@ -1,10 +1,16 @@
 import Link from "next/link";
-import { Newspaper, PackageCheck, ShieldCheck } from "lucide-react";
+import { Newspaper, PackageCheck, ShieldCheck, RadioTower } from "lucide-react";
 
 const cards = [
   { href: "/admin/qc", title: "Quality Control", detail: "Review submitted orders and listings.", Icon: ShieldCheck },
   { href: "/admin/revamp", title: "Revamp! merchandise", detail: "Register and manage upcycled items.", Icon: PackageCheck },
   { href: "/admin/news", title: "News", detail: "Create, save, and publish Swap News.", Icon: Newspaper },
+  {
+    href: "/admin/hubs",
+    title: "Swap Hub",
+    detail: "Monitor hub devices and simulate QR-based item drop-offs.",
+    Icon: RadioTower,
+  },
 ];
 
 export default function AdminDashboardPage() {
