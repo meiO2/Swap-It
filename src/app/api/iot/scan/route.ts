@@ -32,6 +32,8 @@
 
     export async function POST(request: NextRequest) {
     try {
+        await connectDB();
+        
         const device = await authenticateHubDevice(request);
 
         if (!device) {
@@ -56,8 +58,6 @@
         return errorResponse("Invalid QR token.", 400);
         }
 
-        await connectDB();
-
         const tokenHash = hashToken(normalizedToken);
         const now = new Date();
 
@@ -78,7 +78,7 @@
         // Verify donation eligibility.
         if (accessToken.activity === "DONATION") {
         const donation = await Donation.findOne({
-            _id: accessToken.donationSessionId,
+            sessionId: accessToken.donationSessionId,
             userId: accessToken.userId,
             hubId: device.hubId,
             status: "PENDING",

@@ -1,7 +1,7 @@
 
     "use client";
 
-    import { useCallback, useState } from "react";
+    import { useState } from "react";
     import {
     Camera,
     Lock,
@@ -10,8 +10,6 @@
     RefreshCw,
     AlertCircle,
     } from "lucide-react";
-
-    import HubImageScanner from "@/components/hub/HubImageScanner";
 
     type ScanResult = {
     success: true;
@@ -43,18 +41,10 @@
     const [message, setMessage] = useState("");
     const [error, setError] = useState("");
     const [busy, setBusy] = useState(false);
-    const [cameraOpen, setCameraOpen] = useState(false);
     const [eventIndex, setEventIndex] = useState(0);
     const [doorUnlocked, setDoorUnlocked] = useState(false);
     const [doorOpen, setDoorOpen] = useState(false);
     const [completed, setCompleted] = useState(false);
-
-    const handleScan = useCallback((value: string) => {
-        setToken(value);
-        setCameraOpen(false);
-        setMessage("QR code detected. Ready to authorize access.");
-        setError("");
-    }, []);
 
     async function authorizeAccess() {
         if (!token.trim()) {
@@ -151,7 +141,6 @@
         setDoorUnlocked(false);
         setDoorOpen(false);
         setCompleted(false);
-        setCameraOpen(false);
     }
 
     return (
@@ -193,22 +182,6 @@
             <p className="mt-2 text-sm text-ink-muted">
             Scan a valid donation or seller handover QR code using your laptop camera.
             </p>
-
-            {cameraOpen && (
-            <div className="mt-4">
-                <HubCameraScanner onScan={handleScan} />
-            </div>
-            )}
-
-            <div className="mt-4 flex flex-wrap gap-2">
-            <button
-                onClick={() => setCameraOpen((open) => !open)}
-                disabled={!!session || busy}
-                className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-            >
-                {cameraOpen ? "Close camera" : "Open webcam"}
-            </button>
-            </div>
 
             <div className="mt-4">
             <label className="text-sm font-medium text-ink">
