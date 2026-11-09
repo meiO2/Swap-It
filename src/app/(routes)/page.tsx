@@ -67,7 +67,7 @@ export default function HomePage() {
       </section>
 
       <section className="px-4 pt-7">
-        <Link href="/revamp/shop" className="group flex items-center gap-3 rounded-2xl bg-primary p-4 text-white shadow-primary transition hover:bg-primary-dark">
+        <Link href="/revamp/" className="group flex items-center gap-3 rounded-2xl bg-primary p-4 text-white shadow-primary transition hover:bg-primary-dark">
           <span className="flex size-11 shrink-0 items-center justify-center rounded-full bg-white/15">
             <PackageCheck size={21} />
           </span>

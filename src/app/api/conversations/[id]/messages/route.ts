@@ -6,6 +6,7 @@
     import { getCurrentUser } from "@/lib/session";
     import Conversation from "@/models/Conversation";
     import Message from "@/models/Message";
+    import { createNotificationsForMany } from "@/lib/notifications";
 
     // GET: Retrieve messages and mark incoming messages as read.
     export async function GET(
@@ -146,6 +147,31 @@
         conversation.lastMessage = text;
         conversation.lastMessageAt = new Date();
         await conversation.save();
+
+        // Notify all other participants about the new message.
+        const recipientIds = conversation.participants
+        .map((participant) => participant.toString())
+        .filter((participantId) => participantId !== currentUser.id);
+
+        if (recipientIds.length > 0) {
+        try {
+            await createNotificationsForMany({
+            recipientIds,
+            senderId: currentUser.id,
+            type: "NEW_CONVERSATION",
+            title: "New message",
+            message:
+                text.length > 100 ? `${text.slice(0, 100)}...` : text,
+            link: `/chat/${id}`,
+            });
+        } catch (notificationError) {
+            // A notification failure must not prevent message delivery.
+            console.error(
+            "Could not create chat notification:",
+            notificationError
+            );
+        }
+        }
 
         const populatedMessage = await Message.findById(message._id)
         .populate("senderId", "name avatarUrl")
