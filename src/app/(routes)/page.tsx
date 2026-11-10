@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { ArrowRight, Heart, Leaf, PackageCheck, Sparkles } from "lucide-react";
+import { ArrowRight, Leaf, PackageCheck } from "lucide-react";
 import TopBar from "@/components/layout/TopBar";
 import ProductCard from "@/components/ui/ProductCard";
 import type { Product } from "@/data/mock";
@@ -79,20 +79,6 @@ export default function HomePage() {
         </Link>
       </section>
 
-      <section className="px-4 pb-6 pt-7">
-        <div className="rounded-2xl bg-mint-50 p-4">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="flex items-center gap-1.5 text-xs font-semibold text-primary"><Sparkles size={14} /> Small choices, real impact</p>
-              <h2 className="mt-1 text-sm font-semibold text-ink">Your wardrobe can go further.</h2>
-              <p className="mt-1 text-xs leading-relaxed text-ink-muted">Swap, repair, or donate the pieces you no longer wear.</p>
-            </div>
-            <Link href="/news" aria-label="Read Swap News" className="flex size-10 shrink-0 items-center justify-center rounded-full bg-white text-primary shadow-card">
-              <Heart size={18} />
-            </Link>
-          </div>
-        </div>
-      </section>
     </main>
   );
 }

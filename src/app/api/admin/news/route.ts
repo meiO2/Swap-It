@@ -31,12 +31,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, message: "Complete every news field with a valid value." }, { status: 400 });
     }
     try {
-      const imageUrl = new URL(input.image as string);
-      if (imageUrl.protocol !== "https:" && imageUrl.protocol !== "http:") throw new Error("Unsupported image protocol.");
+      const image = input.image as string;
+      const isLocalUpload = image.startsWith("/uploads/");
+      if (!isLocalUpload) {
+        const imageUrl = new URL(image);
+        if (imageUrl.protocol !== "https:" && imageUrl.protocol !== "http:") throw new Error("Unsupported image protocol.");
+      }
       const newsDate = new Date(`${input.date as string}T00:00:00Z`);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date as string) || Number.isNaN(newsDate.getTime()) || newsDate.toISOString().slice(0, 10) !== input.date) throw new Error("Invalid news date.");
     } catch {
-      return NextResponse.json({ success: false, message: "Enter a valid date and HTTP or HTTPS image URL." }, { status: 400 });
+      return NextResponse.json({ success: false, message: "Enter a valid date and an uploaded or HTTP(S) image URL." }, { status: 400 });
     }
     const status = input.status === "published" ? "published" : "draft";
     await connectDB();

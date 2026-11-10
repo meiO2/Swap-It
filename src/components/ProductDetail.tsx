@@ -6,7 +6,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
-  Heart,
   MapPin,
   MessageCircle,
   ShieldCheck,
@@ -18,6 +17,7 @@ import {
   HandoverCard,
   type HandoverEntry,
 } from "@/components/seller/HandoverScheduler";
+import FavoriteButton from "@/components/ui/FavoriteButton";
 
 interface Product {
   _id: string;
@@ -41,7 +41,6 @@ export default function ProductDetail({ id }: { id: string }) {
 
   const [product, setProduct] = useState<Product | null>(null);
   const [loading, setLoading] = useState(true);
-  const [saved, setSaved] = useState(false);
   const [added, setAdded] = useState(false);
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState("");
@@ -281,16 +280,7 @@ export default function ProductDetail({ id }: { id: string }) {
           <ArrowLeft size={19} />
         </Link>
 
-        <button
-          type="button"
-          aria-label={saved ? "Remove from saved items" : "Save item"}
-          onClick={() => setSaved((value) => !value)}
-          className={`absolute right-4 top-4 flex size-10 items-center justify-center rounded-full bg-white/90 ${
-            saved ? "text-danger" : "text-ink"
-          }`}
-        >
-          <Heart size={19} fill={saved ? "currentColor" : "none"} />
-        </button>
+        <FavoriteButton id={product._id} className="absolute right-4 top-4" />
       </div>
 
       <div className="space-y-5 px-4 pt-5">

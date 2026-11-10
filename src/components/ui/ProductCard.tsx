@@ -1,10 +1,13 @@
 import Image from "next/image";
 import Link from "next/link";
 import type { Product } from "@/data/mock";
+import FavoriteButton from "@/components/ui/FavoriteButton";
 
 export default function ProductCard({ product, priority = false }: { product: Product; priority?: boolean }) {
   return (
-    <Link href={`/products/${product.id}`} className="group min-w-0 overflow-hidden rounded-2xl bg-white shadow-card transition hover:-translate-y-0.5">
+    <article className="group relative min-w-0 overflow-hidden rounded-2xl bg-white shadow-card transition hover:-translate-y-0.5">
+      <FavoriteButton id={product.id} className="absolute right-2.5 top-2.5 z-10 size-8" />
+      <Link href={`/products/${product.id}`} className="block">
       <div className="relative aspect-[4/4.7] overflow-hidden bg-mint-50">
         <Image
           src={product.image}
@@ -24,6 +27,7 @@ export default function ProductCard({ product, priority = false }: { product: Pr
           <span className="text-[10px] text-ink-muted">≈ Rp{product.price.toLocaleString("id-ID")}</span>
         </div>
       </div>
-    </Link>
+      </Link>
+    </article>
   );
 }

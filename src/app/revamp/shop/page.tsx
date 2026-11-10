@@ -26,10 +26,10 @@ export default function RevampShopPage() {
       <div className="mb-4 rounded-2xl bg-mint-50 p-3 text-xs leading-relaxed text-ink-muted">Each piece gives rescued textiles a new purpose. Checkout with money, Green Points, or a mix.</div>
       {error && <p role="alert" className="mb-4 rounded-xl bg-danger/10 p-3 text-sm text-danger">{error}</p>}
       {loading ? <p role="status" className="rounded-xl bg-white p-4 text-sm text-ink-muted">Loading merchandise…</p> : items.length ? <div className="grid grid-cols-2 gap-3">{items.map((item) => (
-        <article key={item._id} className="overflow-hidden rounded-2xl bg-white shadow-card">
+        <Link href={`/revamp/shop/${item._id}`} key={item._id} className="block overflow-hidden rounded-2xl bg-white shadow-card transition hover:-translate-y-0.5">
           <div role="img" aria-label={`${item.name} image`} className="aspect-[4/4.7] bg-mint-50 bg-cover bg-center" style={{ backgroundImage: `url("${item.image.replaceAll('"', "%22")}")` }} />
           <div className="p-3"><p className="truncate text-[13px] font-medium text-ink">{item.name}</p><p className="mt-1 text-xs text-ink-muted">{item.condition} · {item.size}</p><p className="mt-2 text-sm font-semibold text-primary">{formatRupiah(item.price)}</p><p className="mt-1 text-[10px] text-ink-muted">{item.category}</p></div>
-        </article>
+        </Link>
       ))}</div> : <p className="rounded-2xl bg-white p-5 text-sm text-ink-muted">{error ? "Merchandise is unavailable right now." : "No Revamp! products are currently available."}</p>}
     </main>
   );

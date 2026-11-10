@@ -24,10 +24,12 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
     }
     if (typeof updates.image === "string") {
       try {
-        const imageUrl = new URL(updates.image);
-        if (imageUrl.protocol !== "https:" && imageUrl.protocol !== "http:") throw new Error("Unsupported image protocol.");
+        if (!updates.image.startsWith("/uploads/")) {
+          const imageUrl = new URL(updates.image);
+          if (imageUrl.protocol !== "https:" && imageUrl.protocol !== "http:") throw new Error("Unsupported image protocol.");
+        }
       } catch {
-        return NextResponse.json({ success: false, message: "Enter a valid HTTP or HTTPS image URL." }, { status: 400 });
+        return NextResponse.json({ success: false, message: "Enter an uploaded or HTTP(S) image URL." }, { status: 400 });
       }
     }
     if (typeof updates.date === "string") {
