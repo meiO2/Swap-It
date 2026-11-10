@@ -37,6 +37,9 @@ QC endpoints allow ADMIN and INSPECTOR.
   code, and optional Green Points. Buyer service fee is 2.5% of the subtotal,
   bounded by the configured minimum and maximum.
 - `GET /api/orders/:id` — returns an order belonging to the current user.
+- `POST /api/uploads` — authenticated multipart upload with 1-8 `images`
+  files (JPEG, PNG, or WebP; up to 5 MB each). The server uploads files to
+  Cloudinary and returns their HTTPS URLs.
 
 ## Admin
 
@@ -44,7 +47,7 @@ QC endpoints allow ADMIN and INSPECTOR.
 - `PATCH /api/admin/qc/:type/:id` — `{ productId, category, answers, notes?,
   evidenceUrls? }`; stores a structured inspection assessment, not a buyer
   rejection. If any criterion is flagged, the item waits for the buyer and
-  requires 1-8 uploaded `/uploads/` evidence photos. The buyer receives a
+  requires 1-8 uploaded Cloudinary evidence photos. The buyer receives a
   `QC_UPDATE` notification and chooses accept or reject through
   `POST /api/orders/:id/qc-decision`. Saving is disabled until approved QC
   criteria are configured in `src/data/qcCriteria.ts`.
@@ -62,7 +65,9 @@ News create requires `title`, `date` (`YYYY-MM-DD`), `description`, `image`
 (HTTP(S) URL), and `clothesDistributed`; `status` may be `draft` or
 `published`. News update accepts those fields individually.
 
-News image and Revamp image values are URLs; this repository does not yet
-provide a file-storage service. Order creation writes an order record but does
-not collect payment. Catalog products, courier choices, Swap Hubs, and fees
-are currently sourced from frontend repository data, not separate APIs.
+News image and Revamp image values are URLs. Image uploads require the
+server-side `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and
+`CLOUDINARY_API_SECRET` environment variables. Order creation writes an order
+record but does not collect payment. Catalog products, courier choices, Swap
+Hubs, and fees are currently sourced from frontend repository data, not
+separate APIs.

@@ -13,7 +13,7 @@ community messaging, and Revamp! upcycled merchandise in one Next.js app.
 - Search and filter by category, size, condition, and price.
 - View product details and seller information.
 - Create, edit, archive, and manage listings.
-- Upload product images.
+- Upload product images and QC evidence to Cloudinary.
 - Add products to a persistent cart.
 - Prevent a seller from buying their own listing.
 - Reserve one-unit listings during checkout.
@@ -124,7 +124,6 @@ src/
   lib/                    Database, auth, payment, shipping, GP, and API helpers
   models/                 Mongoose schemas
   store/                  Zustand stores
-public/uploads/            Local-development image uploads
 ```
 
 ## Getting started
@@ -176,6 +175,9 @@ BITESHIP_ORIGIN_POSTAL_CODE=15339
 
 RESEND_API_KEY=...
 RESEND_FROM_EMAIL=...
+CLOUDINARY_CLOUD_NAME=...
+CLOUDINARY_API_KEY=...
+CLOUDINARY_API_SECRET=...
 ```
 
 ### Environment notes
@@ -191,6 +193,9 @@ RESEND_FROM_EMAIL=...
 - Set `SHIPPING_MODE=biteship` to use Biteship.
 - Biteship API keys must remain server-side.
 - Resend variables are required when verification email delivery is enabled.
+- Cloudinary variables are required for image and QC-evidence uploads. Keep
+  `CLOUDINARY_API_SECRET` server-side; uploaded files are stored in the
+  `swapit` Cloudinary folder.
 
 ## Mock data and database seeding
 

@@ -4,6 +4,7 @@
 
   import { qcCriteriaByCategory } from "@/data/qcCriteria";
   import { requireRole } from "@/lib/authorization";
+  import { isUploadedImageUrl } from "@/lib/image-urls";
   import { connectDB } from "@/lib/mongodb";
 
   import Order from "@/models/Order";
@@ -50,7 +51,7 @@
             input.evidenceUrls.every(
               (url): url is string =>
                 typeof url === "string" &&
-                url.startsWith("/uploads/") &&
+                isUploadedImageUrl(url) &&
                 url.length <= 2000,
             )
           ? input.evidenceUrls
