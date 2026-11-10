@@ -32,7 +32,7 @@ export async function POST(_request: Request, { params }: RouteContext) {
     }
 
     const donation = await Donation.findOneAndUpdate(
-      { _id: id, userId: auth.user.id, status: "PENDING" },
+      { _id: id, userId: auth.user.id, status: { $in: ["SESSION_CREATED", "QR_SCANNED", "UNDER_VERIFICATION", "PENDING"] } },
       {
         $set: {
           acceptedItems: itemCount,

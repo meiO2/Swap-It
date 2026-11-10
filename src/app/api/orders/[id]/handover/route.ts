@@ -88,7 +88,7 @@
         );
         }
 
-        if (!["PAID", "PROCESSING"].includes(order.status)) {
+        if (!["PAID", "AWAITING_SELLER_HANDOVER", "PROCESSING"].includes(order.status)) {
         return NextResponse.json(
             {
             success: false,

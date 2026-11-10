@@ -22,6 +22,7 @@ export interface IQCAssessment {
   decision: "approve" | "reject";
 
   notes?: string;
+  evidenceUrls?: string[];
 
   createdAt?: Date;
   updatedAt?: Date;
@@ -86,6 +87,14 @@ const QCAssessmentSchema = new Schema<IQCAssessment>(
       type: String,
       trim: true,
       maxlength: 2000,
+    },
+    evidenceUrls: {
+      type: [String],
+      default: [],
+      validate: {
+        validator: (urls: string[]) => urls.length <= 8 && urls.every((url) => typeof url === "string" && url.length <= 2000),
+        message: "A QC assessment can include up to 8 evidence URLs.",
+      },
     },
   },
   {

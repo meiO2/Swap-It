@@ -16,7 +16,7 @@
 
         const orders = await Order.find({
         "items.sellerId": sellerId,
-        status: { $in: ["PAID", "PROCESSING"] },
+        status: { $in: ["PAID", "AWAITING_SELLER_HANDOVER", "PROCESSING"] },
         })
         .sort({ createdAt: -1 })
         .lean();

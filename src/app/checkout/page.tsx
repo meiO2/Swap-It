@@ -4,22 +4,21 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   Check,
-  ChevronRight,
   MapPin,
   Package,
   Truck,
   X,
 } from "lucide-react";
-import type { SwapHub } from "@/lib/hubs";
 import { couriers, type Courier } from "@/data/couriers";
 import type { IUserAddress } from "@/models/User";
 import { estimateArrival, formatOrderDate } from "@/lib/orders";
 import { formatRupiah } from "@/lib/format";
 import { apiRequest } from "@/lib/api";
+import { calculateBuyerServiceFee } from "@/lib/fees";
 
 interface CartProduct {
   _id: string;
@@ -65,7 +64,6 @@ export default function CheckoutPage() {
   const [cartLoading, setCartLoading] = useState(true);
   const [cartError, setCartError] = useState("");
 
-  const [method, setMethod] = useState<"courier" | "pickup">("courier");
   const [courierId, setCourierId] = useState(couriers[0].id);
   const [addresses, setAddresses] = useState<IUserAddress[]>([]);
   const [address, setAddress] = useState<IUserAddress>({
@@ -77,8 +75,6 @@ export default function CheckoutPage() {
     postalCode: "",
   });
 
-  const [hubId, setHubId] = useState("");
-  const [swapHubs, setSwapHubs] = useState<SwapHub[]>([]);
   const [addressSheetOpen, setAddressSheetOpen] = useState(false);
   const [addingAddress, setAddingAddress] = useState(false);
   const [newAddress, setNewAddress] = useState({
@@ -116,49 +112,30 @@ export default function CheckoutPage() {
     (rate) => rate.courier_code === courierId,
   );
 
-  const hub = swapHubs.find((item) => item.id === hubId);
-
+  const serviceFee = calculateBuyerServiceFee(subtotal);
   const eta = etaStart
     ? estimateArrival(etaStart, courier.minDays, courier.maxDays)
     : null;
 
-  const methodValid =
-    method === "courier"
-      ? Boolean(
-          address.name &&
-            address.phone &&
-            address.address &&
-            address.city &&
-            courier &&
-            shippingRates.length > 0,
-        )
-      : Boolean(hub);
+  const methodValid = Boolean(
+    address.name &&
+      address.phone &&
+      address.address &&
+      address.city &&
+      courier &&
+      shippingRates.length > 0,
+  );
 
   useEffect(() => {
     const timerId = window.setTimeout(
       () => setEtaStart(new Date().toISOString()),
       0,
     );
-
     return () => window.clearTimeout(timerId);
   }, []);
 
   useEffect(() => {
-    let active = true;
-    apiRequest<SwapHub[]>("/api/hubs")
-      .then((hubs) => {
-        if (active) setSwapHubs(hubs);
-      })
-      .catch((cause: unknown) => {
-        if (active) setError(cause instanceof Error ? cause.message : "Could not load Swap Hubs.");
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (method !== "courier" || !address.postalCode || !items.length) {
+    if (!address.postalCode || !items.length) {
       return;
     }
     let active = true;
@@ -185,7 +162,7 @@ export default function CheckoutPage() {
       window.clearTimeout(loadingTimer);
       window.clearTimeout(errorTimer);
     };
-  }, [address.postalCode, items.length, method]);
+  }, [address.postalCode, items.length]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -325,22 +302,16 @@ export default function CheckoutPage() {
       const order = await apiRequest<OrderResponse>("/api/orders", {
         method: "POST",
         body: JSON.stringify({
-          deliveryMethod: method,
-          ...(method === "pickup" ? { hubId } : {}),
+          deliveryMethod: "courier",
           gpUsed,
-          ...(method === "courier" ? { courierCode: courierId } : {}),
-
-          ...(method === "courier"
-            ? {
-                shippingAddress: {
-                  name: address.name,
-                  phone: address.phone,
-                  address: address.address,
-                  city: address.city,
-                  postalCode: address.postalCode,
-                },
-              }
-            : {}),
+          courierCode: courierId,
+          shippingAddress: {
+            name: address.name,
+            phone: address.phone,
+            address: address.address,
+            city: address.city,
+            postalCode: address.postalCode,
+          },
         }),
       });
 
@@ -467,24 +438,13 @@ export default function CheckoutPage() {
               Delivery method
             </h2>
 
-            <div className="grid grid-cols-2 gap-2">
-              <MethodChoice
-                selected={method === "courier"}
-                onClick={() => setMethod("courier")}
-                icon={<Truck size={18} />}
-                label="Courier delivery"
-              />
-
-              <MethodChoice
-                selected={method === "pickup"}
-                onClick={() => setMethod("pickup")}
-                icon={<Package size={18} />}
-                label="Pick up in person"
-              />
+            <div className="flex items-center gap-3 rounded-2xl bg-mint-50 p-3">
+              <Truck size={18} className="text-primary" />
+              <p className="text-xs font-medium text-ink">
+                Courier delivery only
+              </p>
             </div>
-
-            {method === "courier" ? (
-              <>
+            <>
                 <div className="mt-3 flex items-start gap-3 rounded-2xl bg-mint-50 p-3">
                   <MapPin
                     size={18}
@@ -571,68 +531,7 @@ export default function CheckoutPage() {
                     );
                   })}
                 </div>
-              </>
-            ) : (
-              <>
-                <div
-                  role="radiogroup"
-                  aria-label="Pickup Swap Hub"
-                  className="mt-3 space-y-2"
-                >
-                  {swapHubs.map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      role="radio"
-                      aria-checked={hubId === item.id}
-                      onClick={() => setHubId(item.id)}
-                      className={`flex min-h-[68px] w-full items-start gap-3 rounded-2xl border p-3 text-left ${
-                        hubId === item.id
-                          ? "border-primary bg-mint-50"
-                          : "border-border bg-white"
-                      }`}
-                    >
-                      <span
-                        className={`mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full border ${
-                          hubId === item.id
-                            ? "border-primary bg-primary text-white"
-                            : "border-ink-muted/50 text-transparent"
-                        }`}
-                      >
-                        {hubId === item.id && <Check size={13} />}
-                      </span>
-
-                      <span className="min-w-0 flex-1">
-                        <span className="block text-xs font-semibold text-ink">
-                          {item.name}{" "}
-                          <span className="font-normal text-ink-muted">
-                            · {item.distance}
-                          </span>
-                        </span>
-                        <span className="mt-0.5 block text-[10px] text-ink-muted">
-                          {item.address}
-                        </span>
-                        <span className="block text-[10px] text-ink-muted">
-                          {item.openingHours}
-                        </span>
-                      </span>
-                    </button>
-                  ))}
-                </div>
-
-                <Link
-                  href="/map"
-                  className="mt-2 inline-flex min-h-11 items-center text-xs font-semibold text-primary"
-                >
-                  View on map <ChevronRight size={14} />
-                </Link>
-
-                <p className="mt-1 rounded-xl bg-mint-50 p-3 text-xs leading-relaxed text-ink-muted">
-                  Your selected Hub is currently a frontend selection.
-                  The order API does not yet save the Hub ID.
-                </p>
-              </>
-            )}
+            </>
           </section>
 
           {/* Green Points */}
@@ -684,11 +583,7 @@ export default function CheckoutPage() {
 
             <BreakdownRow
               label="Delivery"
-              value={
-                method === "courier"
-                  ? `${selectedShippingRate?.courier_name ?? courier.name} to ${address.city || "your address"}`
-                  : `Pickup at ${hub?.name ?? "Swap Hub"}`
-              }
+              value={`${selectedShippingRate?.courier_name ?? courier.name} to ${address.city || "your address"}`}
             />
 
             <BreakdownRow
@@ -698,16 +593,12 @@ export default function CheckoutPage() {
 
             <BreakdownRow
               label="Shipping fee"
-              value={
-                method === "pickup"
-                  ? "Free pickup"
-                  : formatRupiah(selectedShippingRate?.price ?? 0)
-              }
+              value={formatRupiah(selectedShippingRate?.price ?? 0)}
             />
 
             <BreakdownRow
-              label="Service fee (prototype)"
-              amount={0}
+              label="Service fee (2.5%)"
+              amount={serviceFee}
             />
 
             <div className="my-3 border-t border-border" />
@@ -719,9 +610,8 @@ export default function CheckoutPage() {
                   Math.max(
                     0,
                     subtotal +
-                      (method === "courier"
-                        ? (selectedShippingRate?.price ?? 0)
-                        : 0) -
+                      (selectedShippingRate?.price ?? 0) +
+                      serviceFee -
                       gpUsed,
                   ),
                 )}
@@ -731,7 +621,7 @@ export default function CheckoutPage() {
 
           {!methodValid && (
             <p className="mt-3 text-xs text-warning">
-              Choose a valid delivery address or pickup Hub to continue.
+              Choose a valid delivery address and courier to continue.
             </p>
           )}
 
@@ -892,36 +782,6 @@ export default function CheckoutPage() {
         </div>
       )}
     </main>
-  );
-}
-
-function MethodChoice({
-  selected,
-  onClick,
-  icon,
-  label,
-}: {
-  selected: boolean;
-  onClick: () => void;
-  icon: ReactNode;
-  label: string;
-}) {
-  return (
-    <button
-      type="button"
-      role="radio"
-      aria-checked={selected}
-      onClick={onClick}
-      className={`flex min-h-12 items-center justify-center gap-1.5 rounded-xl border px-2 text-[11px] font-semibold ${
-        selected
-          ? "border-primary bg-mint-50 text-primary"
-          : "border-border bg-white text-ink-muted"
-      }`}
-    >
-      {icon}
-      <span>{label}</span>
-      {selected && <Check size={13} />}
-    </button>
   );
 }
 

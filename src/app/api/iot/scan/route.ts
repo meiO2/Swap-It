@@ -79,7 +79,7 @@
             sessionId: accessToken.donationSessionId,
             userId: accessToken.userId,
             hubId: device.hubId,
-            status: "PENDING",
+            status: { $in: ["SESSION_CREATED", "QR_SCANNED"] },
         }).lean();
 
         if (!donation) {
@@ -91,13 +91,13 @@
         else if (accessToken.activity === "SELLER_HANDOVER") {
         const order = await Order.findOne({
             _id: accessToken.orderId,
-            sellerId: accessToken.userId,
-            status: { $in: ["PAID", "PROCESSING"] },
+            status: { $in: ["PAID", "AWAITING_SELLER_HANDOVER", "PROCESSING"] },
+            "items.sellerId": accessToken.userId,
             "items.productId": accessToken.productId,
         }).lean();
 
         const handoverItem = order?.items.find(
-            (item: any) =>
+            (item) =>
             item.productId?.toString() ===
             accessToken.productId?.toString()
         );
@@ -135,6 +135,13 @@
 
         if (!consumedToken) {
         return errorResponse("QR token has already been used.", 409);
+        }
+
+        if (consumedToken.activity === "DONATION" && consumedToken.donationSessionId) {
+            await Donation.updateOne(
+                { sessionId: consumedToken.donationSessionId, status: "SESSION_CREATED" },
+                { $set: { status: "QR_SCANNED" } },
+            );
         }
 
         const deviceSession = await HubDeviceSession.create({

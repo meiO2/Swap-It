@@ -88,7 +88,7 @@
             _id: donationId,
             userId: auth.user.id,
             hubId,
-            status: "PENDING",
+            status: { $in: ["SESSION_CREATED", "QR_SCANNED"] },
         });
 
         if (!donation) {
@@ -132,7 +132,7 @@
 
         const order = await Order.findOne({
             _id: orderId,
-            status: { $in: ["PAID", "PROCESSING"] },
+            status: { $in: ["PAID", "AWAITING_SELLER_HANDOVER", "PROCESSING"] },
             "items.productId": productId,
             "items.sellerId": auth.user.id,
         });

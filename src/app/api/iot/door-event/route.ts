@@ -5,6 +5,9 @@
     import { connectDB } from "@/lib/mongodb";
     import { authenticateHubDevice } from "@/lib/hub-device-auth";
     import HubDeviceSession from "@/models/HubDeviceSession";
+    import Order from "@/models/Order";
+    import Product from "@/models/Product";
+    import Donation from "@/models/Donation";
 
     import type {
     HubDoorEventRequest,
@@ -152,6 +155,27 @@
             },
             { status: 409 }
         );
+        }
+
+        // A locked compartment is the auditable point at which a seller
+        // handover becomes received and can enter QC.
+        if (input.event === "DOOR_LOCKED" && updatedSession.activity === "SELLER_HANDOVER" && updatedSession.orderId && updatedSession.productId) {
+            const order = await Order.findById(updatedSession.orderId);
+            const item = order?.items.find((entry) => entry.productId.toString() === updatedSession.productId);
+            if (order && item?.handover && item.handover.status === "SCHEDULED") {
+                item.handover.status = "RECEIVED";
+                item.handover.receivedAt = now;
+                item.qcStatus = "PENDING";
+                order.status = "QC_IN_PROGRESS";
+                await order.save();
+                await Product.updateOne({ _id: item.productId }, { $set: { status: "RECEIVED" } });
+            }
+        }
+        if (input.event === "DOOR_LOCKED" && updatedSession.activity === "DONATION" && updatedSession.donationSessionId) {
+            await Donation.updateOne(
+                { sessionId: updatedSession.donationSessionId, status: { $in: ["QR_SCANNED", "DEPOSITING"] } },
+                { $set: { status: "UNDER_VERIFICATION" } },
+            );
         }
 
         const response: HubDoorEventResponse = {

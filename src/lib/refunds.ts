@@ -53,10 +53,13 @@ export async function createQcCompensation(input: { orderId: string; userId: str
   if (!item) throw new Error("Product not found in this order.");
   const existing = await Refund.findOne({ orderId: order._id, reason: "QUALITY_INSPECTION_FAILED", "auditLog.note": input.productId });
   if (existing) return existing;
-  const refund = await Refund.create({ orderId: order._id, userId: input.userId, reason: "QUALITY_INSPECTION_FAILED", description: "Automatic refund following buyer rejection of a QC report.", status: "PROCESSING", totalApprovedAmount: item.price, auditLog: [{ status: "APPROVED", note: input.productId, at: new Date() }] });
-  const gpKey = `qc-refund:${order._id}:${item.productId}:gp`;
-  await awardGreenPoints({ userId: input.userId, amount: item.price, type: "REFUND", description: "Full product value returned as Green Points after QC rejection", referenceKey: gpKey });
-  await RefundTransaction.create({ refundId: refund._id, orderId: order._id, component: "PRODUCT", refundType: "GP", amount: item.price, status: "COMPLETED", provider: "INTERNAL_GP", providerReference: gpKey, idempotencyKey: gpKey, processedAt: new Date() });
+  // QC cancellation returns the product value (including redeemed GP) and the
+  // paid service fee as GP. Shipping is excluded because shipment never starts.
+  const refundAmount = order.subtotal + order.serviceFee;
+  const refund = await Refund.create({ orderId: order._id, userId: input.userId, reason: "QUALITY_INSPECTION_FAILED", description: "Automatic Green Point refund following buyer rejection of a QC report.", status: "PROCESSING", totalApprovedAmount: refundAmount, auditLog: [{ status: "APPROVED", note: input.productId, at: new Date() }] });
+  const gpKey = `qc-refund:${order._id}:gp`;
+  await awardGreenPoints({ userId: input.userId, amount: refundAmount, type: "REFUND", description: "Product value and service fee returned as Green Points after QC rejection", referenceKey: gpKey });
+  await RefundTransaction.create({ refundId: refund._id, orderId: order._id, component: "PRODUCT", refundType: "GP", amount: refundAmount, status: "COMPLETED", provider: "INTERNAL_GP", providerReference: gpKey, idempotencyKey: gpKey, processedAt: new Date() });
   const transactions = await RefundTransaction.find({ refundId: refund._id }).lean();
   const hasPending = transactions.some((entry) => entry.status === "PENDING"); const hasFailed = transactions.some((entry) => entry.status === "FAILED"); const hasCompleted = transactions.some((entry) => entry.status === "COMPLETED");
   const status = hasPending || (hasFailed && hasCompleted) ? "PARTIALLY_COMPLETED" : hasFailed ? "FAILED" : "COMPLETED";

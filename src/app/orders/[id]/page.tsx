@@ -92,7 +92,9 @@ function OrderDetailsContent() {
   const delivery = viewOrder.delivery;
   const routeDates = delivery?.courier ? formatOrderDate(viewOrder.estimatedArrival ?? addDays(new Date(viewOrder.createdAt), delivery.courier.maxDays).toISOString()) : null;
   const detailsTitle = product ? `${product.name} × ${viewOrder.items[0]?.quantity ?? 1}` : `${viewOrder.items.length} item${viewOrder.items.length === 1 ? "" : "s"}`;
-  const qcRejected = viewOrder.qcStatus === "rejected" && viewOrder.status === "QC review";
+  const flaggedItems = viewOrder.items.filter(
+    (item) => item.qcStatus === "FAILED_AWAITING_BUYER",
+  );
 
   return (
     <main className="min-h-dvh space-y-4 px-4 pb-8 pt-5">
@@ -126,15 +128,29 @@ function OrderDetailsContent() {
         </div>
       </section>
 
-      {qcRejected && viewOrder.qcDecisionDeadline && (
-        <section className="rounded-3xl border border-danger/15 bg-danger/5 p-4">
+      {flaggedItems.length > 0 && (
+        <section className="rounded-3xl border border-danger/20 bg-danger/5 p-4">
           <h2 className="flex items-center gap-2 text-sm font-bold text-danger"><BadgeCheck size={18} /> Action needed</h2>
-          <p className="mt-2 text-xs leading-relaxed text-ink">Quality check found that this item is not eligible.</p>
-          <p className="mt-3 rounded-xl bg-warning/10 p-3 text-xs font-medium text-warning">Time remaining: <Countdown deadline={viewOrder.qcDecisionDeadline} /></p>
-          <p className="mt-3 text-xs leading-relaxed text-ink-muted">Buyer keep/refund actions are not available: shipment and Green Point refund APIs are not implemented. No refund will be implied or recorded by this page.</p>
+          <p className="mt-2 text-xs leading-relaxed text-ink">QC menemukan catatan pada barang ini. Tinjau detail dan foto bukti, lalu pilih apakah ingin tetap menerima atau menolak barang.</p>
+          {flaggedItems.map((item) => (
+            <div key={item.productId} className="mt-4 rounded-2xl bg-white p-3">
+              {item.qcAssessment?.notes && <p className="text-sm text-ink">{item.qcAssessment.notes}</p>}
+              <div className="mt-3 flex gap-2 overflow-x-auto">
+                {(item.qcAssessment?.evidenceUrls ?? []).map((url) => (
+                  <a key={url} href={url} target="_blank" rel="noreferrer" className="shrink-0">
+                    <img src={url} alt="QC evidence" className="size-20 rounded-xl object-cover" />
+                  </a>
+                ))}
+              </div>
+              {item.qcDecisionDeadline && <p className="mt-3 rounded-xl bg-warning/10 p-3 text-xs font-medium text-warning">Batas pilihan: <Countdown deadline={item.qcDecisionDeadline} /></p>}
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                <button key={`${item.productId}-accept`} disabled={qcSaving} onClick={() => void decideQc(item.productId, "ACCEPT")} className="min-h-11 rounded-full border border-primary/40 text-xs font-semibold text-primary disabled:opacity-60">Terima barang</button>
+                <button key={`${item.productId}-reject`} disabled={qcSaving} onClick={() => void decideQc(item.productId, "REJECT")} className="min-h-11 rounded-full bg-danger text-xs font-semibold text-white disabled:opacity-60">Tolak &amp; minta refund</button>
+              </div>
+            </div>
+          ))}
         </section>
       )}
-      {viewOrder.items.some((item) => "qcStatus" in item && item.qcStatus === "FAILED_AWAITING_BUYER") && <section className="rounded-3xl border border-danger/20 bg-danger/5 p-4"><h2 className="text-sm font-bold text-danger">Official QC report: major damage found</h2><p className="mt-2 text-xs leading-relaxed text-ink-muted">Our quality team found that this item does not meet the listing quality standard. Review the item documentation above and choose within three days.</p><p className="mt-3 text-xs font-semibold text-ink">If rejected, the product value is returned to its original sources: GP as GP and cash to the original payment method. Shipping and service fees are handled separately.</p><div className="mt-3 grid gap-2 sm:grid-cols-2">{viewOrder.items.filter((item) => "qcStatus" in item && item.qcStatus === "FAILED_AWAITING_BUYER").map((item) => <><button key={`${item.productId}-accept`} disabled={qcSaving} onClick={() => void decideQc(item.productId, "ACCEPT")} className="min-h-11 rounded-full border border-primary/40 text-xs font-semibold text-primary disabled:opacity-60">Accept product — continue shipping</button><button key={`${item.productId}-reject`} disabled={qcSaving} onClick={() => void decideQc(item.productId, "REJECT")} className="min-h-11 rounded-full bg-danger text-xs font-semibold text-white disabled:opacity-60">Reject — refund to original source</button></>)}</div></section>}
 
       <section className="rounded-3xl bg-white p-3 shadow-card">
         <OrderTimeline order={viewOrder} />

@@ -5,6 +5,7 @@
     import { requireAuth } from "@/lib/authorization";
     import { connectDB } from "@/lib/mongodb";
     import Order from "@/models/Order";
+    import Product from "@/models/Product";
     import Notification from "@/models/Notification";
     import { createQcCompensation } from "@/lib/refunds";
 
@@ -115,14 +116,28 @@
 
         if (input.decision === "ACCEPT") {
         item.qcStatus = "BUYER_ACCEPTED";
+        order.status = "PROCESSING";
+        await Product.updateOne({ _id: item.productId }, { $set: { status: "READY_TO_SHIP" } });
         } else {
         item.qcStatus = "BUYER_REJECTED";
+        item.returnStatus = "AWAITING_SELLER";
+        item.returnDeadline = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+        order.status = "CANCELLED";
+        await Product.updateOne({ _id: item.productId }, { $set: { status: "RETURN_PENDING" } });
         }
 
         await order.save();
 
         if (input.decision === "REJECT") {
           await createQcCompensation({ orderId: id, userId: auth.user.id, productId: input.productId });
+          await Notification.create({
+            recipientId: item.sellerId,
+            type: "ORDER_UPDATE",
+            title: "Item awaiting retrieval",
+            message: "The buyer rejected the QC report. Retrieve the item or request return delivery within 14 calendar days.",
+            link: `/orders/${order._id.toString()}`,
+            isRead: false,
+          });
           await Notification.create({
             recipientId: auth.user.id,
             type: "QC_UPDATE",
@@ -138,7 +153,7 @@
         message:
             input.decision === "ACCEPT"
             ? "You accepted the product. It can proceed to shipping."
-            : "Your rejection has been recorded. Refunds are being processed to the original payment sources.",
+            : "Your rejection has been recorded. Product value and service fee were returned as Green Points.",
         data: {
             orderId: order._id.toString(),
             productId: item.productId.toString(),

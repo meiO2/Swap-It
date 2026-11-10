@@ -2,6 +2,10 @@ export type DeliveryMethod = "courier" | "pickup";
 export type OrderStatus =
   | "PENDING_PAYMENT"
   | "PAID"
+  | "RECEIVED"
+  | "AWAITING_SELLER_HANDOVER"
+  | "QC_IN_PROGRESS"
+  | "AWAITING_BUYER_CONFIRMATION"
   | "PROCESSING"
   | "SHIPPED"
   | "DELIVERED"
@@ -33,7 +37,20 @@ export type OrderDelivery = {
 
 export type OrderShape = {
   id: string;
-  items: Array<{ productId: string; productValue: number; quantity: number }>;
+  items: Array<{
+    productId: string;
+    productValue: number;
+    quantity: number;
+    qcStatus?: string;
+    qcDecisionDeadline?: string;
+    qcAssessment?: {
+      category?: string;
+      answers?: Array<{ criterionId: string; optionId: string }>;
+      decision?: string;
+      notes?: string;
+      evidenceUrls?: string[];
+    };
+  }>;
   subtotal?: number;
   totalAmount?: number;
   deliveryMethod?: DeliveryMethod;
@@ -137,13 +154,25 @@ export function estimateArrival(createdAt: string, minDays: number, maxDays: num
 }
 
 export function getCurrentTimelineIndex(order: OrderShape) {
-  if (order.status === "QC review" || order.status === "Not eligible" || order.qcStatus === "pending") return 1;
-  if (order.status === "Processing") return 1;
-  if (order.status === "Shipped") return 2;
+  if (
+    order.status === "QC review" ||
+    order.status === "Not eligible" ||
+    order.status === "RECEIVED" ||
+    order.status === "QC_IN_PROGRESS" ||
+    order.status === "AWAITING_BUYER_CONFIRMATION" ||
+    order.qcStatus === "pending"
+  ) return 1;
+  if (order.status === "PROCESSING" || order.status === "Processing") return 2;
+  if (order.status === "SHIPPED" || order.status === "Shipped") return 3;
   if (order.status === "On the way") return 3;
   if (order.status === "Out for delivery") return 4;
   if (order.status === "Ready for pickup") return 2;
-  if (order.status === "Delivered" || order.status === "Completed") return order.delivery?.method === "pickup" ? 3 : 5;
+  if (
+    order.status === "DELIVERED" ||
+    order.status === "COMPLETED" ||
+    order.status === "Delivered" ||
+    order.status === "Completed"
+  ) return order.delivery?.method === "pickup" ? 3 : 5;
   if (order.status === "Picked up") return 3;
   return -1;
 }

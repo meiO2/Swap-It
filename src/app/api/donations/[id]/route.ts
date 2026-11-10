@@ -57,7 +57,7 @@
         // Find an active donation session
         const donation = await Donation.findOne({
         _id: id,
-        status: "PENDING",
+        status: { $in: ["SESSION_CREATED", "QR_SCANNED", "UNDER_VERIFICATION", "PENDING"] },
         });
 
         if (!donation) {
@@ -82,7 +82,7 @@
 
         // Finalize donation
         const updatedDonation = await Donation.findOneAndUpdate(
-        { _id: id, status: "PENDING" },
+        { _id: id, status: { $in: ["SESSION_CREATED", "QR_SCANNED", "UNDER_VERIFICATION", "PENDING"] } },
         {
             $set: {
             acceptedItems,

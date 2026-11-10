@@ -32,18 +32,22 @@ QC endpoints allow ADMIN and INSPECTOR.
 - `PATCH /api/listings/:id` — updates the pickup date for a listing owned by
   the current user.
 - `GET /api/orders` — current user's orders.
-- `POST /api/orders` — creates an order from catalog `items` (`productId`,
-  `quantity`) and `delivery`: either `{ method: "courier", courierId,
-  addressId }` using a saved address, or `{ method: "pickup", hubId }`.
+- `POST /api/orders` — creates an order using courier delivery only. The
+  request includes `deliveryMethod: "courier"`, a shipping address, courier
+  code, and optional Green Points. Buyer service fee is 2.5% of the subtotal,
+  bounded by the configured minimum and maximum.
 - `GET /api/orders/:id` — returns an order belonging to the current user.
 
 ## Admin
 
 - `GET /api/admin/qc` — QC queue for orders and listings.
-- `PATCH /api/admin/qc/:type/:id` — `{ category, answers, decision, notes? }`;
-  stores a structured assessment and updates its entity. Saving is currently
-  disabled by the API until approved QC criteria are configured in
-  `src/data/qcCriteria.ts`.
+- `PATCH /api/admin/qc/:type/:id` — `{ productId, category, answers, notes?,
+  evidenceUrls? }`; stores a structured inspection assessment, not a buyer
+  rejection. If any criterion is flagged, the item waits for the buyer and
+  requires 1-8 uploaded `/uploads/` evidence photos. The buyer receives a
+  `QC_UPDATE` notification and chooses accept or reject through
+  `POST /api/orders/:id/qc-decision`. Saving is disabled until approved QC
+  criteria are configured in `src/data/qcCriteria.ts`.
 - `GET /api/admin/revamp` — ADMIN-only merchandise list.
 - `POST /api/admin/revamp` — ADMIN-only `{ name, category, size, condition, description, price, image, status }`.
 - `PATCH /api/admin/revamp/:id` — ADMIN-only `{ status }` update; accepted

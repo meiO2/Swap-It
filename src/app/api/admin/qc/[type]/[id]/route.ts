@@ -7,7 +7,9 @@
   import { connectDB } from "@/lib/mongodb";
 
   import Order from "@/models/Order";
+  import Product from "@/models/Product";
   import QCAssessment from "@/models/QCAssessment";
+  import Notification from "@/models/Notification";
 
   export async function PATCH(
     request: NextRequest,
@@ -42,17 +44,42 @@
 
       const input = body as Record<string, unknown>;
 
+      const evidenceUrls = input.evidenceUrls === undefined
+        ? []
+        : Array.isArray(input.evidenceUrls) &&
+            input.evidenceUrls.every(
+              (url): url is string =>
+                typeof url === "string" &&
+                url.startsWith("/uploads/") &&
+                url.length <= 2000,
+            )
+          ? input.evidenceUrls
+          : null;
+
+      if (
+        evidenceUrls === null ||
+        evidenceUrls.length > 8
+      ) {
+        return NextResponse.json(
+          {
+            success: false,
+            message:
+              "QC evidence must contain 1-8 uploaded photos.",
+          },
+          { status: 400 },
+        );
+      }
+
       if (
         typeof input.productId !== "string" ||
         !mongoose.isValidObjectId(input.productId) ||
         typeof input.category !== "string" ||
-        (input.decision !== "approve" && input.decision !== "reject") ||
         !Array.isArray(input.answers)
       ) {
         return NextResponse.json(
           {
             success: false,
-            message: "Product, category, answers, and decision are required.",
+            message: "Product, category, and answers are required.",
           },
           { status: 400 },
         );
@@ -106,13 +133,25 @@
         );
       }
 
+      const hasIssues = answers.some((answer) => answer.optionId !== "good");
+
+      if (hasIssues && (!evidenceUrls || evidenceUrls.length === 0)) {
+        return NextResponse.json(
+          {
+            success: false,
+            message: "Add at least one evidence photo for every flagged QC result.",
+          },
+          { status: 400 },
+        );
+      }
+
       await connectDB();
 
       const productId = new mongoose.Types.ObjectId(input.productId);
 
       const order = await Order.findById(id);
 
-      if (!order || order.status !== "PROCESSING") {
+      if (!order) {
         return NextResponse.json(
           { success: false, message: "Order is not available for QC." },
           { status: 404 },
@@ -125,8 +164,10 @@
 
       if (
         !item ||
-        item.handover?.method !== "HUB_DROP_OFF" ||
-        item.handover.status !== "RECEIVED"
+        (item.handover?.status !== "RECEIVED" &&
+          item.qcStatus !== "PENDING" &&
+          order.status !== "RECEIVED" &&
+          order.status !== "QC_IN_PROGRESS")
       ) {
         return NextResponse.json(
           {
@@ -166,15 +207,18 @@
               criterionId: String(answer.criterionId),
               optionId: String(answer.optionId),
             })),
-            decision: input.decision,
+            // The assessment records that the inspection was completed.
+            // Buyer-facing outcome is stored separately on the order item.
+            decision: "approve",
             notes: input.notes,
+            evidenceUrls,
           });
 
           await assessment.save({ session });
 
           const currentOrder = await Order.findById(order._id).session(session);
 
-          if (!currentOrder || currentOrder.status !== "PROCESSING") {
+          if (!currentOrder) {
             throw new Error("Order is no longer available for QC.");
           }
 
@@ -185,26 +229,57 @@
 
           if (
             !currentItem ||
-            currentItem.handover?.method !== "HUB_DROP_OFF" ||
-            currentItem.handover.status !== "RECEIVED" ||
+            (currentItem.handover?.status !== "RECEIVED" &&
+              currentItem.qcStatus !== "PENDING" &&
+              currentOrder.status !== "RECEIVED" &&
+              currentOrder.status !== "QC_IN_PROGRESS") ||
             currentItem.qcAssessmentId
           ) {
             throw new Error("Product is no longer available for QC.");
           }
 
           currentItem.qcAssessmentId = assessment._id;
+          if (currentItem.handover) {
+            currentItem.handover.status = "RECEIVED";
+          }
+          currentItem.listingPriceSnapshot ??= currentItem.price;
 
-          if (input.decision === "approve") {
+          if (!hasIssues) {
             currentItem.qcStatus = "PASSED";
             currentItem.qcDecisionDeadline = undefined;
+            await Product.updateOne({ _id: productId }, { $set: { status: "QC_PASSED" } }, { session });
           } else {
             currentItem.qcStatus = "FAILED_AWAITING_BUYER";
             currentItem.qcDecisionDeadline = new Date(
               Date.now() + 3 * 24 * 60 * 60 * 1000,
             );
+            currentOrder.status = "AWAITING_BUYER_CONFIRMATION";
+            await Product.updateOne({ _id: productId }, { $set: { status: "AWAITING_BUYER_CONFIRMATION" } }, { session });
           }
 
-          await currentOrder.save({ session });
+          await currentOrder.save({
+            session,
+            validateModifiedOnly: true,
+          });
+
+          await Notification.create(
+            [
+              {
+                recipientId: currentOrder.buyerId,
+                senderId: new mongoose.Types.ObjectId(auth.user.id),
+                type: "QC_UPDATE",
+                title: hasIssues
+                  ? "QC selesai: pilihan diperlukan"
+                  : "QC selesai: barang lolos pemeriksaan",
+                message: hasIssues
+                  ? `Pemeriksaan menemukan ${answers.filter((answer) => answer.optionId !== "good").length} bagian yang perlu kamu tinjau. Buka laporan QC untuk memilih terima atau tolak barang.`
+                  : "Pemeriksaan kualitas selesai dan barang siap diproses ke tahap berikutnya.",
+                link: `/orders/${currentOrder._id.toString()}`,
+                isRead: false,
+              },
+            ],
+            { session },
+          );
 
           assessmentId = assessment._id;
         });
@@ -224,7 +299,7 @@
             entityType: "order",
             entityId: id,
             productId: productId.toString(),
-            decision: input.decision,
+            decision: "approve",
           },
         },
         { status: 201 },

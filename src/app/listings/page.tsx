@@ -174,7 +174,7 @@ export default function ListingsPage() {
           />
 
           <p className="mt-3 text-sm text-ink-muted">
-            You haven't published any products yet.
+            You haven&apos;t published any products yet.
           </p>
 
           <Link
@@ -201,7 +201,7 @@ export default function ListingsPage() {
         </h2>
 
         <p className="mt-1 text-xs leading-relaxed text-ink-muted">
-          Your products are managed through SwapIt's marketplace.
+          Your products are managed through SwapIt&apos;s marketplace.
           When a product is purchased, its handover schedule can be
           managed separately through Seller Center.
         </p>

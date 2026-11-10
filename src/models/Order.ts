@@ -4,6 +4,10 @@ import mongoose, { Model, Schema } from "mongoose";
 export type OrderStatus =
   | "PENDING_PAYMENT"
   | "PAID"
+  | "AWAITING_SELLER_HANDOVER"
+  | "RECEIVED"
+  | "QC_IN_PROGRESS"
+  | "AWAITING_BUYER_CONFIRMATION"
   | "PROCESSING"
   | "SHIPPED"
   | "DELIVERED"
@@ -43,6 +47,7 @@ export type HandoverStatus =
   | "SCHEDULED"
   | "IN_TRANSIT"
   | "RECEIVED"
+  | "EXPIRED"
   | "CANCELLED";
 
 
@@ -101,6 +106,13 @@ export interface IOrderItem {
   // Buyer's decision after failed QC
   buyerQcDecision?: BuyerQCDecision;
   buyerQcDecisionAt?: Date;
+
+  // Immutable commercial and post-QC-return snapshots.
+  listingPriceSnapshot?: number;
+  handoverDeadline?: Date;
+  returnStatus?: "NOT_REQUIRED" | "AWAITING_SELLER" | "RETURN_SHIPMENT_REQUESTED" | "RETURNED" | "TRANSFERRED_TO_REVAMP";
+  returnDeadline?: Date;
+  revampCompensationGrantedAt?: Date;
 }
 
 
@@ -180,6 +192,7 @@ const HandoverSchema = new Schema<IOrderHandover>(
         "SCHEDULED",
         "IN_TRANSIT",
         "RECEIVED",
+        "EXPIRED",
         "CANCELLED",
       ],
       default: "AWAITING_PAYMENT",
@@ -256,6 +269,17 @@ const OrderItemSchema = new Schema<IOrderItem>(
     buyerQcDecisionAt: {
       type: Date,
     },
+    // Optional for orders created before this lifecycle field existed.
+    // New orders always populate it at checkout.
+    listingPriceSnapshot: { type: Number, min: 1 },
+    handoverDeadline: { type: Date, index: true },
+    returnStatus: {
+      type: String,
+      enum: ["NOT_REQUIRED", "AWAITING_SELLER", "RETURN_SHIPMENT_REQUESTED", "RETURNED", "TRANSFERRED_TO_REVAMP"],
+      default: "NOT_REQUIRED",
+    },
+    returnDeadline: { type: Date, index: true },
+    revampCompensationGrantedAt: { type: Date },
 
   },
   { _id: false },
@@ -310,6 +334,10 @@ const OrderSchema = new Schema<IOrder>(
       enum: [
         "PENDING_PAYMENT",
         "PAID",
+        "AWAITING_SELLER_HANDOVER",
+        "RECEIVED",
+        "QC_IN_PROGRESS",
+        "AWAITING_BUYER_CONFIRMATION",
         "PROCESSING",
         "SHIPPED",
         "DELIVERED",

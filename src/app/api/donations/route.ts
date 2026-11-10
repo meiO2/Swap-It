@@ -44,7 +44,7 @@
         acceptedItems: 0,
         rejectedItems: 0,
         gpAwarded: 0,
-        status: "PENDING",
+        status: "SESSION_CREATED",
         });
 
         return NextResponse.json(

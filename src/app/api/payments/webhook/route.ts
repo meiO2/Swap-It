@@ -222,6 +222,7 @@ export async function POST(request: Request) {
         // ==========================================
 
         if (paymentStatus === "PAID") {
+          const handoverDeadline = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
           await Order.updateOne(
             {
               _id: orderId,
@@ -229,7 +230,9 @@ export async function POST(request: Request) {
             },
             {
               $set: {
-                status: "PAID",
+                status: "AWAITING_SELLER_HANDOVER",
+                "items.$[].handover.status": "AWAITING_SELLER_SCHEDULE",
+                "items.$[].handoverDeadline": handoverDeadline,
               },
             },
             { session }
@@ -242,6 +245,11 @@ export async function POST(request: Request) {
             .lean();
 
           if (paidOrder) {
+            await Product.updateMany(
+              { _id: { $in: paidOrder.items.map((item) => item.productId) }, status: "RESERVED" },
+              { $set: { status: "SOLD_PENDING_HANDOVER" } },
+              { session },
+            );
             // Notify all sellers involved in this order.
             const sellerIds = [
               ...new Set(
@@ -257,7 +265,7 @@ export async function POST(request: Request) {
               type: "ORDER_UPDATE",
               title: "New order received",
               message:
-                "A buyer has placed an order for your product. Please prepare it for handover.",
+                "A buyer has placed an order for your product. Please choose drop-off or pickup and hand it over within 3 calendar days.",
               link: "/orders",
               session,
             });

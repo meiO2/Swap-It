@@ -12,7 +12,7 @@
     upcyclingQualityItems: number;
     socialDonationItems: number;
     gpAwarded: number;
-    status: "PENDING" | "COMPLETED" | "CANCELLED";
+    status: "SESSION_CREATED" | "QR_SCANNED" | "UNDER_VERIFICATION" | "REWARD_GRANTED" | "DEPOSITING" | "COMPLETED" | "DISCREPANCY_REVIEW" | "PENDING" | "CANCELLED";
     confirmedAt?: Date;
     }
 
@@ -69,8 +69,8 @@
 
         status: {
         type: String,
-        enum: ["PENDING", "COMPLETED", "CANCELLED"],
-        default: "PENDING",
+        enum: ["SESSION_CREATED", "QR_SCANNED", "UNDER_VERIFICATION", "REWARD_GRANTED", "DEPOSITING", "COMPLETED", "DISCREPANCY_REVIEW", "PENDING", "CANCELLED"],
+        default: "SESSION_CREATED",
         },
 
         confirmedAt: {

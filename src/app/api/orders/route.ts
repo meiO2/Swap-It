@@ -5,7 +5,6 @@ import { requireAuth } from "@/lib/authorization";
 import { connectDB } from "@/lib/mongodb";
 import Cart from "@/models/Cart";
 import Order, {
-  type DeliveryMethod,
   type HandoverMethod,
   type HandoverStatus,
   type IOrderAddress,
@@ -14,8 +13,8 @@ import Order, {
 import Product from "@/models/Product";
 import { getBiteshipCourierCode } from "@/lib/biteship";
 import { getShippingRates, ShippingRequestError } from "@/lib/shipping";
-import { getSwapHubs } from "@/lib/hubs";
 import { getGreenPointBalance, redeemGreenPoints } from "@/lib/green-points";
+import { calculateBuyerServiceFee } from "@/lib/fees";
 
 const PAYMENT_EXPIRY_MINUTES = 30;
 
@@ -28,10 +27,6 @@ function isAddress(value: unknown): value is IOrderAddress {
     (field) =>
       typeof address[field] === "string" && address[field].trim().length > 0,
   );
-}
-
-function isDeliveryMethod(value: unknown): value is DeliveryMethod {
-  return value === "courier" || value === "pickup";
 }
 
 export async function GET() {
@@ -79,11 +74,11 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json();
 
-    if (!isDeliveryMethod(body?.deliveryMethod)) {
+    if (body?.deliveryMethod !== "courier") {
       return NextResponse.json(
         {
           success: false,
-          message: "deliveryMethod must be courier or pickup.",
+          message: "Buyer orders must use courier delivery.",
         },
         { status: 400 },
       );
@@ -99,19 +94,6 @@ export async function POST(request: NextRequest) {
           message:
             "A valid shippingAddress is required for courier delivery.",
         },
-        { status: 400 },
-      );
-    }
-
-    const availableHubs =
-      body.deliveryMethod === "pickup" ? await getSwapHubs() : [];
-    const pickupHub =
-      body.deliveryMethod === "pickup"
-        ? availableHubs.find((hub) => hub.id === body.hubId)
-        : undefined;
-    if (body.deliveryMethod === "pickup" && !pickupHub) {
-      return NextResponse.json(
-        { success: false, message: "A valid Swap Hub is required for pickup." },
         { status: 400 },
       );
     }
@@ -226,6 +208,7 @@ export async function POST(request: NextRequest) {
             name: product.name,
             price: product.price,
             image: product.images[0],
+            listingPriceSnapshot: product.price,
 
             handover: {
               method,
@@ -253,7 +236,8 @@ export async function POST(request: NextRequest) {
           0,
         );
 
-        const serviceFee = 0;
+        // Service fee is paid in currency, never with Green Points.
+        const serviceFee = calculateBuyerServiceFee(subtotal);
         const availableGp = await getGreenPointBalance(
           auth.user.id,
           new Date(),
@@ -308,16 +292,6 @@ export async function POST(request: NextRequest) {
                   postalCode: body.shippingAddress.postalCode.trim(),
                 }
               : undefined,
-          pickupHub: pickupHub
-            ? {
-                id: pickupHub.id,
-                name: pickupHub.name,
-                address: pickupHub.address,
-                distance: pickupHub.distance,
-                openingHours: pickupHub.openingHours,
-              }
-            : undefined,
-
           status: "PENDING_PAYMENT",
           expiresAt,
         });

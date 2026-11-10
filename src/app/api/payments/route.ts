@@ -363,13 +363,22 @@ export async function GET(request: NextRequest) {
               },
             },
           );
+          const handoverDeadline = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
           await Order.updateOne(
             { _id: pending.orderId, status: "PENDING_PAYMENT" },
-            { $set: { status: finalStatus === "PAID" ? "PAID" : finalStatus === "EXPIRED" ? "EXPIRED" : "CANCELLED" } },
+            { $set: finalStatus === "PAID" ? {
+              status: "AWAITING_SELLER_HANDOVER",
+              "items.$[].handover.status": "AWAITING_SELLER_SCHEDULE",
+              "items.$[].handoverDeadline": handoverDeadline,
+            } : { status: finalStatus === "EXPIRED" ? "EXPIRED" : "CANCELLED" } },
           );
           if (finalStatus === "PAID") {
             const paidOrder = await Order.findById(pending.orderId).lean();
             if (paidOrder) {
+              await Product.updateMany(
+                { _id: { $in: paidOrder.items.map((item) => item.productId) }, status: "RESERVED" },
+                { $set: { status: "SOLD_PENDING_HANDOVER" } },
+              );
               const reward = Math.floor(paidOrder.subtotal * GREEN_POINT_REWARDS.purchaseRate);
               if (reward > 0) {
                 await awardGreenPoints({

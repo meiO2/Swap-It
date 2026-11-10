@@ -8,6 +8,19 @@ export type ProductStatus =
   | "AVAILABLE"
   | "RESERVED"
   | "SOLD"
+  | "SOLD_PENDING_HANDOVER"
+  | "RECEIVED"
+  | "QC_IN_PROGRESS"
+  | "QC_PASSED"
+  | "QC_DEFECT_FOUND"
+  | "AWAITING_BUYER_CONFIRMATION"
+  | "READY_TO_SHIP"
+  | "SHIPPED"
+  | "COMPLETED"
+  | "CANCELLED"
+  | "RETURN_PENDING"
+  | "RETURNED"
+  | "TRANSFERRED_TO_REVAMP"
   | "INACTIVE"
   | "REVAMP_ELIGIBLE"
   | "REVAMPED";
@@ -142,6 +155,19 @@ const ProductSchema = new Schema<IProduct>(
         "AVAILABLE",
         "RESERVED",
         "SOLD",
+        "SOLD_PENDING_HANDOVER",
+        "RECEIVED",
+        "QC_IN_PROGRESS",
+        "QC_PASSED",
+        "QC_DEFECT_FOUND",
+        "AWAITING_BUYER_CONFIRMATION",
+        "READY_TO_SHIP",
+        "SHIPPED",
+        "COMPLETED",
+        "CANCELLED",
+        "RETURN_PENDING",
+        "RETURNED",
+        "TRANSFERRED_TO_REVAMP",
         "INACTIVE",
         "REVAMP_ELIGIBLE",
         "REVAMPED",

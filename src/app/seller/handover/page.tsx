@@ -36,7 +36,8 @@
     }, []);
 
     useEffect(() => {
-        void loadHandovers();
+        const timer = window.setTimeout(() => void loadHandovers(), 0);
+        return () => window.clearTimeout(timer);
     }, [loadHandovers]);
 
     return (

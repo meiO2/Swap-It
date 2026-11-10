@@ -23,6 +23,9 @@ function conditionToModel(condition: string) {
 }
 
 export async function ensureMockDataSeeded() {
+  // Demo data must be explicitly enabled. Production and manual test data are
+  // never repopulated merely because a catalogue endpoint is visited.
+  if (process.env.SEED_DEMO_DATA !== "true") return;
   await connectDB();
 
   await Promise.all([
@@ -115,6 +118,7 @@ export async function ensureMockDataSeeded() {
 }
 
 export async function ensureMockConversationsSeeded(currentUserId: string) {
+  if (process.env.SEED_DEMO_DATA !== "true") return;
   await connectDB();
   const currentUserObjectId = new mongoose.Types.ObjectId(currentUserId);
 

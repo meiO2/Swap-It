@@ -16,8 +16,16 @@ export async function GET() {
   try {
     await connectDB();
 
+    // Receipt is the source of truth for QC eligibility. This also keeps the
+    // queue resilient when a legacy order has not yet had its parent status
+    // migrated to QC_IN_PROGRESS.
     const orders = await Order.find({
-      status: "PROCESSING",
+      $or: [
+        { "items.handover.status": "RECEIVED" },
+        { "items.qcStatus": "PENDING" },
+        { status: "RECEIVED", "items.qcStatus": { $nin: ["PASSED", "FAILED_AWAITING_BUYER", "BUYER_ACCEPTED", "BUYER_REJECTED", "EXPIRED"] } },
+        { status: "QC_IN_PROGRESS", "items.qcStatus": { $nin: ["PASSED", "FAILED_AWAITING_BUYER", "BUYER_ACCEPTED", "BUYER_REJECTED", "EXPIRED"] } },
+      ],
     })
       .sort({ createdAt: 1 })
       .lean();
@@ -27,8 +35,11 @@ export async function GET() {
       order.items
         .filter(
           (item) =>
-            item.handover?.method === "HUB_DROP_OFF" &&
-            item.handover?.status === "RECEIVED",
+            item.handover?.status === "RECEIVED" ||
+            item.qcStatus === "PENDING" ||
+            ((order.status === "RECEIVED" || order.status === "QC_IN_PROGRESS") &&
+              !item.qcAssessmentId &&
+              !["PASSED", "FAILED_AWAITING_BUYER", "BUYER_ACCEPTED", "BUYER_REJECTED", "EXPIRED"].includes(item.qcStatus ?? "")),
         )
         .map((item) => ({
           orderId: order._id,
@@ -38,6 +49,11 @@ export async function GET() {
           price: item.price,
           image: item.image,
           handover: item.handover,
+          qcStatus: item.qcStatus ?? "NOT_STARTED",
+          qcAssessmentId: item.qcAssessmentId,
+          qcDecisionDeadline: item.qcDecisionDeadline,
+          buyerQcDecision: item.buyerQcDecision,
+          buyerQcDecisionAt: item.buyerQcDecisionAt,
         })),
     );
 
@@ -61,24 +77,13 @@ export async function GET() {
       ]),
     );
 
-    const reviewedProducts = new Set(
-      assessments
-        .filter((assessment) => assessment.productId)
-        .map(
-          (assessment) =>
-            `${String(assessment.entityId)}:${String(assessment.productId)}`,
-        ),
-    );
-
-    const data = orderItems
-      .filter(
-        (item) =>
-          !reviewedProducts.has(
-            `${String(item.orderId)}:${String(item.productId)}`,
-          ),
-      )
-      .map((item) => {
+    const data = orderItems.map((item) => {
         const product = productMap.get(String(item.productId));
+        const assessment = assessments.find(
+          (candidate) =>
+            String(candidate.entityId) === String(item.orderId) &&
+            String(candidate.productId) === String(item.productId),
+        );
 
         return {
           type: "order" as const,
@@ -93,8 +98,20 @@ export async function GET() {
           size: product?.size,
           condition: product?.condition,
           description: product?.description,
-          fulfillment: "HUB_DROP_OFF",
+          fulfillment: item.handover?.method,
+          qcStatus: item.qcStatus,
+          buyerQcDecision: item.buyerQcDecision,
+          qcDecisionDeadline: item.qcDecisionDeadline,
+          qcAssessment: assessment
+            ? {
+                decision: assessment.decision,
+                notes: assessment.notes,
+                evidenceUrls: assessment.evidenceUrls ?? [],
+                answers: assessment.answers,
+              }
+            : null,
           handover: {
+            method: item.handover?.method,
             hubId: item.handover?.hubId,
             hubName: item.handover?.hubName,
             status: item.handover?.status,

@@ -159,6 +159,7 @@ export function HandoverCard({
     const [isRescheduling, setIsRescheduling] = useState(false);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState("");
+    const [renderedAt] = useState(() => Date.now());
 
     const rescheduleCount = handover.rescheduleCount ?? 0;
     const rescheduleHistory = handover.rescheduleHistory ?? [];
@@ -176,7 +177,7 @@ export function HandoverCard({
         !Number.isNaN(originalScheduledAt.getTime());
 
     const hoursUntilSchedule = hasValidOriginalSchedule
-        ? originalScheduledAt.getTime() - Date.now()
+        ? originalScheduledAt.getTime() - renderedAt
         : 0;
 
     const canReschedule =

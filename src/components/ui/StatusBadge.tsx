@@ -5,6 +5,10 @@ type Status = OrderStatus | "Submitted" | "Sorting" | "Passed" | "Not Eligible" 
 const styles: Record<Status, string> = {
   PENDING_PAYMENT: "bg-warning/15 text-warning",
   PAID: "bg-info/15 text-info",
+  AWAITING_SELLER_HANDOVER: "bg-warning/15 text-warning",
+  RECEIVED: "bg-warning/15 text-warning",
+  QC_IN_PROGRESS: "bg-warning/15 text-warning",
+  AWAITING_BUYER_CONFIRMATION: "bg-warning/15 text-warning",
   PROCESSING: "bg-info/15 text-info",
   SHIPPED: "bg-primary-soft/20 text-primary-dark",
   DELIVERED: "bg-success/15 text-success",
