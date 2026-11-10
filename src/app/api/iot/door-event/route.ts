@@ -13,8 +13,6 @@
     HubDeviceState,
     } from "@/types/hub-device";
 
-    export const runtime = "nodejs";
-
     const transitions: Record<
     HubDeviceState,
     Partial<Record<HubDeviceEvent, HubDeviceState>>

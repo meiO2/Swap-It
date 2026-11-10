@@ -15,8 +15,6 @@
 
     import HubDeviceSession from "@/models/HubDeviceSession";
 
-    export const runtime = "nodejs";
-
     function hashToken(token: string) {
     return createHash("sha256").update(token).digest("hex");
     }

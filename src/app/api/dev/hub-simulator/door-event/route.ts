@@ -2,8 +2,6 @@
     import { NextRequest, NextResponse } from "next/server";
     import { requireRole } from "@/lib/authorization";
 
-    export const runtime = "nodejs";
-
     export async function POST(request: NextRequest) {
     try {
         const auth = await requireRole(["ADMIN"]);
