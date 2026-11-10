@@ -6,7 +6,7 @@
     import { connectDB } from "@/lib/mongodb";
     import Order from "@/models/Order";
     import Product from "@/models/Product";
-    import Notification from "@/models/Notification";
+    import { createNotification } from "@/lib/notifications";
     import { createQcCompensation } from "@/lib/refunds";
 
     type RouteContext = {
@@ -130,21 +130,19 @@
 
         if (input.decision === "REJECT") {
           await createQcCompensation({ orderId: id, userId: auth.user.id, productId: input.productId });
-          await Notification.create({
+          await createNotification({
             recipientId: item.sellerId,
             type: "ORDER_UPDATE",
             title: "Item awaiting retrieval",
             message: "The buyer rejected the QC report. Retrieve the item or request return delivery within 14 calendar days.",
             link: `/orders/${order._id.toString()}`,
-            isRead: false,
           });
-          await Notification.create({
+          await createNotification({
             recipientId: auth.user.id,
             type: "QC_UPDATE",
             title: "QC rejection refund processed",
             message: `Your rejection was recorded. ${item.price.toLocaleString("id-ID")} GP will be credited as compensation.`,
             link: `/orders/${order._id.toString()}`,
-            isRead: false,
           });
         }
 

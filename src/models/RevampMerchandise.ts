@@ -14,6 +14,8 @@ export interface IRevampMerchandise {
   image: string;
   status: RevampStatus;
   createdBy: mongoose.Types.ObjectId;
+  sourceProductId?: mongoose.Types.ObjectId;
+  revampOfferId?: mongoose.Types.ObjectId;
 }
 
 const RevampMerchandiseSchema = new Schema<IRevampMerchandise>({
@@ -26,6 +28,8 @@ const RevampMerchandiseSchema = new Schema<IRevampMerchandise>({
   image: { type: String, required: true, trim: true, maxlength: 2000 },
   status: { type: String, enum: ["draft", "available", "archived"], default: "draft" },
   createdBy: { type: Schema.Types.ObjectId, ref: "User", required: true },
+  sourceProductId: { type: Schema.Types.ObjectId, ref: "Product", index: true },
+  revampOfferId: { type: Schema.Types.ObjectId, ref: "RevampOffer", index: true },
 }, { timestamps: true });
 
 const RevampMerchandise: Model<IRevampMerchandise> = mongoose.models.RevampMerchandise || mongoose.model<IRevampMerchandise>("RevampMerchandise", RevampMerchandiseSchema);

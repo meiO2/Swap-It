@@ -3,6 +3,10 @@
         {
         "path": "/api/cron/qc-deadlines",
         "schedule": "0 0 * * *"
+        },
+        {
+        "path": "/api/cron/revamp-eligibility",
+        "schedule": "15 0 * * *"
         }
     ]
     }

@@ -5,6 +5,7 @@
     import { connectDB } from "@/lib/mongodb";
     import Order from "@/models/Order";
     import { swapHubs } from "@/data/mock";
+    import { createNotification } from "@/lib/notifications";
 
     type RouteContext = {
     params: Promise<{ id: string }>;
@@ -115,7 +116,7 @@
         }
 
         if (
-        ["IN_TRANSIT", "RECEIVED", "CANCELLED"].includes(
+        ["SCHEDULED", "IN_TRANSIT", "RECEIVED", "CANCELLED", "EXPIRED"].includes(
             item.handover.status,
         )
         ) {
@@ -173,6 +174,7 @@
         item.handover.requestedAt = new Date();
 
         await order.save();
+        await createNotification({ recipientId: order.buyerId.toString(), senderId: auth.user.id, type: "ORDER_UPDATE", title: "Seller handover scheduled", message: `${item.name} has been scheduled for ${item.handover.method === "PICKUP" ? "pickup" : "Swap Hub drop-off"}.`, link: `/orders/${order._id.toString()}` });
 
         return NextResponse.json(
         {

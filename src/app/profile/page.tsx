@@ -12,6 +12,7 @@ import { apiRequest } from "@/lib/api";
 
 const links = [
   { label: "Favorites", detail: "Clothes you saved to revisit", href: "/favorites", Icon: Heart },
+  { label: "Revamp offers", detail: "Decide on eligible unsold listings", href: "/revamp/offers", Icon: PackageCheck },
   { label: "My listings", detail: "Manage your listings and QC", href: "/listings", Icon: ListChecks },
   { label: "My orders", detail: "Track purchases and swaps", href: "/orders", Icon: PackageCheck },
   { label: "Payment history", detail: "View Midtrans transactions", href: "/payments", Icon: ReceiptText },

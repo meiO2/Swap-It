@@ -4,6 +4,7 @@
     import { requireAuth } from "@/lib/authorization";
     import { connectDB } from "@/lib/mongodb";
     import Order from "@/models/Order";
+    import { createNotification } from "@/lib/notifications";
 
     type RouteContext = {
     params: Promise<{ id: string }>;
@@ -179,6 +180,7 @@
         handover.rescheduleCount = rescheduleCount + 1;
 
         await order.save();
+        await createNotification({ recipientId: order.buyerId.toString(), senderId: auth.user.id, type: "ORDER_UPDATE", title: "Seller handover rescheduled", message: `${item.name} has a new handover schedule.`, link: `/orders/${order._id.toString()}` });
 
         return NextResponse.json(
         {

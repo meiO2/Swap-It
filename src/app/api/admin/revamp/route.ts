@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { requireRole } from "@/lib/authorization";
 import { connectDB } from "@/lib/mongodb";
 import RevampMerchandise from "@/models/RevampMerchandise";
+import RevampOffer from "@/models/RevampOffer";
 
 export async function GET() {
   const auth = await requireRole(["ADMIN"]);
@@ -37,13 +38,23 @@ export async function POST(request: NextRequest) {
     } catch {
       return NextResponse.json({ success: false, message: "Enter a valid HTTP or HTTPS image URL." }, { status: 400 });
     }
-    const status = input.status === "available" || input.status === "archived" ? input.status : "draft";
     await connectDB();
+    let revampOfferId: string | undefined;
+    let sourceProductId: string | undefined;
+    if (input.revampOfferId !== undefined) {
+      if (typeof input.revampOfferId !== "string") return NextResponse.json({ success: false, message: "Invalid Revamp offer." }, { status: 400 });
+      const offer = await RevampOffer.findOne({ _id: input.revampOfferId, status: "ACCEPTED" }).lean();
+      if (!offer) return NextResponse.json({ success: false, message: "Choose an accepted Revamp offer." }, { status: 400 });
+      revampOfferId = offer._id.toString(); sourceProductId = offer.productId.toString();
+    }
+    const status = input.status === "available" || input.status === "archived" ? input.status : "draft";
     const product = await RevampMerchandise.create({
       ...Object.fromEntries(fields.map((field) => [field, (input[field] as string).trim()])),
       price: input.price,
       status,
       createdBy: auth.user.id,
+      revampOfferId,
+      sourceProductId,
     });
     return NextResponse.json({ success: true, data: product }, { status: 201 });
   } catch (error) {

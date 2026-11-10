@@ -4,6 +4,7 @@ import { requireAuth } from "@/lib/authorization";
 import { connectDB } from "@/lib/mongodb";
 import Donation from "@/models/Donation";
 import { awardGreenPoints, GREEN_POINT_REWARDS } from "@/lib/green-points";
+import { createNotification } from "@/lib/notifications";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -55,6 +56,7 @@ export async function POST(_request: Request, { params }: RouteContext) {
       description: `Temporary donation reward for ${itemCount} item${itemCount === 1 ? "" : "s"}`,
       referenceKey: `donation:${donation._id.toString()}`,
     });
+    await createNotification({ recipientId: auth.user.id, type: "DONATION_DELIVERED", title: "Donation completed", message: `${donation.gpAwarded.toLocaleString("id-ID")} GP was added for your donation.`, link: "/wallet" });
     return NextResponse.json({ success: true, data: donation });
   } catch (error) {
     console.error("Complete donation error:", error);

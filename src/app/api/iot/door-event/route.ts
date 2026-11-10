@@ -8,6 +8,7 @@
     import Order from "@/models/Order";
     import Product from "@/models/Product";
     import Donation from "@/models/Donation";
+    import { createNotificationsForMany } from "@/lib/notifications";
 
     import type {
     HubDoorEventRequest,
@@ -169,6 +170,7 @@
                 order.status = "QC_IN_PROGRESS";
                 await order.save();
                 await Product.updateOne({ _id: item.productId }, { $set: { status: "RECEIVED" } });
+                await createNotificationsForMany({ recipientIds: [order.buyerId.toString(), item.sellerId.toString()], type: "ITEM_ARRIVED", title: "Item received by SwapIt", message: `${item.name} has been received and will proceed to quality inspection.`, link: `/orders/${order._id.toString()}` });
             }
         }
         if (input.event === "DOOR_LOCKED" && updatedSession.activity === "DONATION" && updatedSession.donationSessionId) {

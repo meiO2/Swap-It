@@ -3,6 +3,7 @@ import { connectDB } from "@/lib/mongodb";
 import { awardGreenPoints } from "@/lib/green-points";
 import Order from "@/models/Order";
 import Product from "@/models/Product";
+import { createNotificationsForMany } from "@/lib/notifications";
 
 // Runs daily in Vercel. Stable GP reference keys make retries idempotent.
 export async function GET(request: NextRequest) {
@@ -27,6 +28,7 @@ export async function GET(request: NextRequest) {
       await order.save();
       const amount = order.subtotal + order.serviceFee;
       if (amount > 0) await awardGreenPoints({ userId: order.buyerId.toString(), amount, type: "REFUND", description: "Green Point refund after seller handover deadline elapsed", referenceKey: `handover-expired:${order._id}:refund` });
+      await createNotificationsForMany({ recipientIds: [order.buyerId.toString(), ...expired.map((item) => item.sellerId.toString())], type: "ORDER_UPDATE", title: "Seller handover deadline expired", message: "The handover deadline elapsed and the affected item is no longer proceeding through this order.", link: `/orders/${order._id.toString()}` });
       handoverExpired += expired.length;
     }
 
@@ -39,6 +41,7 @@ export async function GET(request: NextRequest) {
           item.buyerQcDecision = "ACCEPT";
           item.buyerQcDecisionAt = now;
           await Product.updateOne({ _id: item.productId }, { $set: { status: "READY_TO_SHIP" } });
+          await createNotificationsForMany({ recipientIds: [order.buyerId.toString(), item.sellerId.toString()], type: "QC_UPDATE", title: "QC decision deadline reached", message: "The buyer decision window has ended and the item will proceed through the accepted QC path.", link: `/orders/${order._id.toString()}` });
           changed = true;
           autoAccepted++;
         }
@@ -56,6 +59,7 @@ export async function GET(request: NextRequest) {
           await Product.updateOne({ _id: item.productId }, { $set: { status: "TRANSFERRED_TO_REVAMP" } });
           const compensation = Math.floor((item.listingPriceSnapshot ?? item.price) * 0.5);
           if (compensation > 0) await awardGreenPoints({ userId: item.sellerId.toString(), amount: compensation, type: "EARN", description: "50% listing-price compensation after transfer to Revamp", referenceKey: `revamp-transfer:${order._id}:${item.productId}` });
+          await createNotificationsForMany({ recipientIds: [item.sellerId.toString()], type: "REVAMP_UPDATE", title: "Item transferred to Revamp", message: "The seller retrieval deadline elapsed. The item has entered the Revamp workflow and applicable compensation was processed.", link: "/revamp" });
           changed = true;
           transferredToRevamp++;
         }

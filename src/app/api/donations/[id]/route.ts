@@ -5,6 +5,7 @@
     import Donation from "@/models/Donation";
     import { requireRole } from "@/lib/authorization";
     import { awardGreenPoints, GREEN_POINT_REWARDS } from "@/lib/green-points";
+    import { createNotification } from "@/lib/notifications";
 
     type RouteContext = {
     params: Promise<{ id: string }>;
@@ -116,6 +117,7 @@
                 referenceKey: `donation:${donation._id.toString()}`,
             });
         }
+        await createNotification({ recipientId: donation.userId.toString(), type: "DONATION_DELIVERED", title: "Donation quality assessment complete", message: gpAwarded > 0 ? `${gpAwarded.toLocaleString("id-ID")} GP was awarded after quality assessment.` : "Your donation quality assessment is complete.", link: "/wallet" });
 
         return NextResponse.json(
         {
