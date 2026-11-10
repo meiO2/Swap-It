@@ -1,8 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
   allowedDevOrigins: ["127.0.0.1"],
+
   images: {
     remotePatterns: [
       {
@@ -11,11 +11,12 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+
   experimental: {
     agentFeedback: true,
   },
-  cacheComponents: false,
-  partialPrefetching: true,
+
+  cacheComponents: true,
 };
 
 export default nextConfig;
