@@ -1,5 +1,5 @@
 
-    import { Types } from "mongoose";
+    import { Types, type ClientSession } from "mongoose";
 
     import { connectDB } from "@/lib/mongodb";
     import Notification, {
@@ -22,11 +22,9 @@
     title: string;
     message: string;
     link?: string | null;
+    session?: ClientSession;
     };
 
-    /**
-     * Creates one notification for a user.
-     */
     export async function createNotification(
     input: CreateNotificationInput
     ) {
@@ -34,10 +32,7 @@
         throw new Error("Invalid notification recipient ID.");
     }
 
-    if (
-        input.senderId &&
-        !Types.ObjectId.isValid(input.senderId)
-    ) {
+    if (input.senderId && !Types.ObjectId.isValid(input.senderId)) {
         throw new Error("Invalid notification sender ID.");
     }
 
@@ -57,10 +52,6 @@
     });
     }
 
-    /**
-     * Creates the same notification for multiple users.
-     * Duplicate recipient IDs are automatically removed.
-     */
     export async function createNotificationsForMany(
     input: CreateMultipleNotificationsInput
     ) {
@@ -68,16 +59,11 @@
 
     if (recipientIds.length === 0) return [];
 
-    if (
-        recipientIds.some((id) => !Types.ObjectId.isValid(id))
-    ) {
+    if (recipientIds.some((id) => !Types.ObjectId.isValid(id))) {
         throw new Error("One or more notification recipient IDs are invalid.");
     }
 
-    if (
-        input.senderId &&
-        !Types.ObjectId.isValid(input.senderId)
-    ) {
+    if (input.senderId && !Types.ObjectId.isValid(input.senderId)) {
         throw new Error("Invalid notification sender ID.");
     }
 
@@ -95,6 +81,7 @@
         link: input.link ?? null,
         isRead: false,
         readAt: null,
-        }))
+        })),
+        input.session ? { session: input.session } : {}
     );
     }

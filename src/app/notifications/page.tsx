@@ -12,6 +12,8 @@ import {
   Sparkles,
   WalletCards,
   CheckCheck,
+  MessageCircle,
+  RefreshCw,
 } from "lucide-react";
 import { useSwapStore } from "@/store/useSwapStore";
 import { formatShortDate } from "@/lib/format";
@@ -24,6 +26,8 @@ const icons = {
   qc: ShieldAlert,
   match: Sparkles,
   donation: Leaf,
+  message: MessageCircle,
+  revamp: RefreshCw,
 };
 
 type ServerNotification = {
@@ -32,7 +36,14 @@ type ServerNotification = {
   detail: string;
   createdAt: string;
   href: string;
-  kind: "qc" | "order";
+  kind:
+    | "wallet"
+    | "order"
+    | "qc"
+    | "match"
+    | "donation"
+    | "message"
+    | "revamp";
   isRead: boolean;
   sender: {
     id: string;
@@ -60,35 +71,78 @@ export default function NotificationsPage() {
     (state) => state.notifications
   );
 
-  const [serverNotifications, setServerNotifications] = useState<
-    ServerNotification[]
-  >([]);
+  const [serverNotifications, setServerNotifications] =
+    useState<ServerNotification[]>([]);
 
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
   const [actionError, setActionError] = useState("");
 
+  
   useEffect(() => {
     let cancelled = false;
 
-    apiRequest<ServerNotification[]>("/api/notifications")
-      .then((data) => {
-        if (!cancelled) setServerNotifications(data);
-      })
-      .catch((error: unknown) => {
+    async function fetchNotifications(isInitial = false) {
+      try {
+        const data = await apiRequest<ServerNotification[]>(
+          "/api/notifications"
+        );
+
+        if (cancelled) return;
+
+        setServerNotifications((current) => {
+          const existingNotifications = new Map(
+            current.map((notification) => [
+              notification.id,
+              notification,
+            ])
+          );
+
+          return data.map((notification) => {
+            const existing = existingNotifications.get(
+              notification.id
+            );
+
+            return {
+              ...notification,
+              // Preserve locally updated read status during polling.
+              isRead: existing?.isRead
+                ? true
+                : notification.isRead,
+            };
+          });
+        });
+
+        if (isInitial) {
+          setActionError("");
+        }
+      } catch (error) {
         console.error("Could not load notifications.", error);
-        if (!cancelled) {
+
+        if (isInitial && !cancelled) {
           setActionError("Could not load your notifications.");
         }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+      } finally {
+        if (isInitial && !cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    // Initial notification fetch.
+    void fetchNotifications(true);
+
+    // Refresh every 10 seconds.
+    const intervalId = window.setInterval(() => {
+      void fetchNotifications();
+    }, 10000);
 
     return () => {
       cancelled = true;
+      window.clearInterval(intervalId);
     };
   }, []);
+
 
   const allNotifications: NotificationView[] = [
     ...serverNotifications.map((notification) => ({
@@ -96,7 +150,6 @@ export default function NotificationsPage() {
       time: formatShortDate(notification.createdAt),
     })),
 
-    // Local Zustand notifications don't have persistent read status yet.
     ...donationNotifications.map((notification) => ({
       ...notification,
       time: formatShortDate(notification.createdAt),
@@ -147,7 +200,9 @@ export default function NotificationsPage() {
       );
     } catch (error) {
       console.error("Could not mark notifications as read.", error);
-      setActionError("Could not update notifications. Please try again.");
+      setActionError(
+        "Could not update notifications. Please try again."
+      );
     } finally {
       setUpdating(false);
     }
@@ -163,7 +218,10 @@ export default function NotificationsPage() {
       try {
         await markAsRead(notification.id);
       } catch (error) {
-        console.error("Could not mark notification as read.", error);
+        console.error(
+          "Could not mark notification as read.",
+          error
+        );
       }
     }
 
@@ -192,10 +250,9 @@ export default function NotificationsPage() {
 
         <div className="relative ml-auto">
           <Bell className="text-primary" size={20} />
+
           {unreadCount > 0 && (
-            <span className="absolute -right-2 -top-2 flex size-4 items-center justify-center rounded-full bg-red-500 text-[9px] font-bold text-white">
-              {unreadCount > 9 ? "9+" : unreadCount}
-            </span>
+            <span className="absolute -right-1 -top-1 size-2 rounded-full bg-red-500" />
           )}
         </div>
       </header>
@@ -239,6 +296,12 @@ export default function NotificationsPage() {
           allNotifications.map((notification) => {
             const Icon = icons[notification.kind];
 
+            const displayTitle =
+              notification.kind === "message" &&
+              notification.sender
+                ? `New message from ${notification.sender.name}`
+                : notification.title;
+
             return (
               <Link
                 key={notification.id}
@@ -252,16 +315,23 @@ export default function NotificationsPage() {
                     : "border border-primary/20 bg-mint-50/70"
                 }`}
               >
-                <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-mint-50 text-primary">
-                  <Icon size={18} />
-                </span>
+                {notification.kind === "message" &&
+                notification.sender?.avatarUrl ? (
+                  <img
+                    src={notification.sender.avatarUrl}
+                    alt={notification.sender.name}
+                    className="size-9 shrink-0 rounded-full object-cover"
+                  />
+                ) : (
+                  <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-mint-50 text-primary">
+                    <Icon size={18} />
+                  </span>
+                )}
 
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center justify-between gap-2">
                     <span className="flex items-center gap-2 text-xs font-semibold text-ink">
-                      {notification.title === "New message" && notification.sender
-                        ? `New message from ${notification.sender.name}`
-                        : notification.title}
+                      {displayTitle}
 
                       {!notification.isRead && (
                         <span className="size-2 shrink-0 rounded-full bg-primary" />

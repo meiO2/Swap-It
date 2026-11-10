@@ -4,6 +4,31 @@ import { requireAuth } from "@/lib/authorization";
 import { connectDB } from "@/lib/mongodb";
 import Notification from "@/models/Notification";
 
+function getNotificationKind(type: string) {
+  switch (type) {
+    case "NEW_CONVERSATION":
+      return "message";
+
+    case "QC_UPDATE":
+      return "qc";
+
+    case "REVAMP_UPDATE":
+      return "revamp";
+
+    case "DONATION_DELIVERED":
+      return "donation";
+
+    case "SWAP_MATCH":
+      return "match";
+
+    case "ITEM_SHIPPED":
+    case "ITEM_ARRIVED":
+    case "ORDER_UPDATE":
+    default:
+      return "order";
+  }
+}
+
 export async function GET() {
   try {
     const auth = await requireAuth();
@@ -36,7 +61,7 @@ export async function GET() {
             notification.createdAt?.toISOString() ??
             new Date(0).toISOString(),
           href: notification.link ?? "/notifications",
-          kind: notification.type === "QC_UPDATE" ? "qc" : "order",
+          kind: getNotificationKind(notification.type),
           isRead: notification.isRead,
           sender: sender?._id
             ? {
