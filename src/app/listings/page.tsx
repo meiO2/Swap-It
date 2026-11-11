@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
   ArrowLeft,
+  Pencil,
   ImageIcon,
   Package,
   Plus,
@@ -226,83 +227,92 @@ function ProductCard({
   const status = STATUS_CONFIG[product.status];
 
   return (
-      <Link
-        href={`/products/${product._id}`}
-        className="block rounded-2xl bg-white p-4 shadow-card transition hover:shadow-md"
-      >
-      <div className="flex gap-3">
-        <div className="size-24 shrink-0 overflow-hidden rounded-xl bg-mint-50">
-          {product.images?.[0] ? (
-            <img
-              src={product.images[0]}
-              alt={product.name}
-              className="h-full w-full object-cover"
-            />
-          ) : (
-            <div className="flex h-full items-center justify-center text-primary">
-              <ImageIcon size={28} />
-            </div>
-          )}
-        </div>
-
-        <div className="min-w-0 flex-1">
-          <div className="mb-2 flex flex-wrap items-center gap-2">
-            <span
-              className={`rounded-full px-2.5 py-1 text-[10px] font-semibold ${status.style}`}
-            >
-              {status.label}
-            </span>
+    <article className="rounded-2xl bg-white p-4 shadow-card transition hover:shadow-md">
+      <Link href={`/products/${product._id}`} className="block">
+        <div className="flex gap-3">
+          <div className="size-24 shrink-0 overflow-hidden rounded-xl bg-mint-50">
+            {product.images?.[0] ? (
+              <img
+                src={product.images[0]}
+                alt={product.name}
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <div className="flex h-full items-center justify-center text-primary">
+                <ImageIcon size={28} />
+              </div>
+            )}
           </div>
 
-          <h2 className="text-sm font-semibold text-ink">
-            {product.name}
-          </h2>
+          <div className="min-w-0 flex-1">
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <span
+                className={`rounded-full px-2.5 py-1 text-[10px] font-semibold ${status.style}`}
+              >
+                {status.label}
+              </span>
+            </div>
 
-          <p className="mt-1 text-xs text-ink-muted">
-            {product.category} · Size {product.size}
+            <h2 className="text-sm font-semibold text-ink">
+              {product.name}
+            </h2>
+
+            <p className="mt-1 text-xs text-ink-muted">
+              {product.category} · Size {product.size}
+            </p>
+
+            <p className="mt-1 text-xs text-ink-muted">
+              {CONDITION_LABELS[product.condition] ??
+                product.condition}
+            </p>
+
+            <p className="mt-2 text-sm font-semibold text-primary">
+              {formatRupiah(product.price)}
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-3 rounded-xl bg-mint-50 p-3 text-xs">
+          <p className="font-medium text-ink">
+            {product.fulfillment}
           </p>
 
-          <p className="mt-1 text-xs text-ink-muted">
-            {CONDITION_LABELS[product.condition] ??
-              product.condition}
-          </p>
+          {product.fulfillment === "Pickup" &&
+            product.pickupAddress && (
+              <p className="mt-1 text-ink-muted">
+                Pickup from {product.pickupAddress.name}:{" "}
+                {product.pickupAddress.address},{" "}
+                {product.pickupAddress.city}{" "}
+                {product.pickupAddress.postalCode}
+              </p>
+            )}
 
-          <p className="mt-2 text-sm font-semibold text-primary">
-            {formatRupiah(product.price)}
+          {product.fulfillment === "Pickup" &&
+            product.pickupDate && (
+              <p className="mt-1 text-ink-muted">
+                Preferred pickup date:{" "}
+                {formatShortDate(product.pickupDate)}
+              </p>
+            )}
+
+          <p className="mt-2 text-[10px] text-ink-muted">
+            Published:{" "}
+            {product.publishedAt
+              ? formatShortDate(product.publishedAt)
+              : "Not published"}
           </p>
         </div>
-      </div>
+      </Link>
 
-      <div className="mt-3 rounded-xl bg-mint-50 p-3 text-xs">
-        <p className="font-medium text-ink">
-          {product.fulfillment}
-        </p>
-
-        {product.fulfillment === "Pickup" &&
-          product.pickupAddress && (
-            <p className="mt-1 text-ink-muted">
-              Pickup from {product.pickupAddress.name}:{" "}
-              {product.pickupAddress.address},{" "}
-              {product.pickupAddress.city}{" "}
-              {product.pickupAddress.postalCode}
-            </p>
-          )}
-
-        {product.fulfillment === "Pickup" &&
-          product.pickupDate && (
-            <p className="mt-1 text-ink-muted">
-              Preferred pickup date:{" "}
-              {formatShortDate(product.pickupDate)}
-            </p>
-          )}
-
-        <p className="mt-2 text-[10px] text-ink-muted">
-          Published:{" "}
-          {product.publishedAt
-            ? formatShortDate(product.publishedAt)
-            : "Not published"}
-        </p>
-      </div>
-    </Link>
+      {product.status === "AVAILABLE" && (
+        <Link
+          href={`/sell?edit=${encodeURIComponent(product._id)}`}
+          className="mt-3 inline-flex items-center gap-2 rounded-full bg-mint-50 px-3 py-2 text-xs font-semibold text-primary hover:bg-mint-100"
+        >
+          <Pencil size={14} />
+          Edit listing
+        </Link>
+      )}
+    </article>
   );
 }

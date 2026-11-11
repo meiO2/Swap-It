@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import { connectDB } from "@/lib/mongodb";
 import { requireAuth } from "@/lib/authorization";
 import Product from "@/models/Product";
+import User from "@/models/User";
 import { ensureMockDataSeeded } from "@/lib/mock-seed";
 import {
   isProductOwner,
@@ -141,6 +142,16 @@ export async function PATCH(
     const permission = await canManageProduct(id);
     if (!permission.success) return permission.response;
 
+    if (permission.product.status !== "AVAILABLE") {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Only available listings can be edited.",
+        },
+        { status: 409 },
+      );
+    }
+
     const parsed = parseProductInput(await request.json(), true);
     if (parsed.error) {
       return NextResponse.json(
@@ -148,21 +159,75 @@ export async function PATCH(
         { status: 400 },
       );
     }
-    const update: Record<string, unknown> = { ...parsed.data };
-    if (update.status === "AVAILABLE" && permission.product.status !== "AVAILABLE") {
-      update.publishedAt = new Date();
-    } else if (
-      update.status &&
-      update.status !== "AVAILABLE" &&
-      permission.product.status === "AVAILABLE"
-    ) {
-      update.publishedAt = null;
+    const { pickupAddressId, ...productData } = parsed.data;
+    const update: Record<string, unknown> = { ...productData };
+
+    if (update.fulfillment === "Pickup") {
+      if (
+        !update.pickupDate &&
+        (permission.product.fulfillment !== "Pickup" ||
+          !permission.product.pickupDate)
+      ) {
+        return NextResponse.json(
+          {
+            success: false,
+            message: "Please select a pickup date.",
+          },
+          { status: 400 },
+        );
+      }
+
+      if (pickupAddressId) {
+        const user = await User.findById(permission.auth.user.id)
+          .select("addresses")
+          .lean();
+        const pickupAddress = user?.addresses?.find(
+          (address) => address.id === pickupAddressId,
+        );
+
+        if (!pickupAddress) {
+          return NextResponse.json(
+            {
+              success: false,
+              message: "Please select a valid saved pickup address.",
+            },
+            { status: 400 },
+          );
+        }
+
+        update.pickupAddress = pickupAddress;
+      } else if (
+        permission.product.fulfillment !== "Pickup" ||
+        !permission.product.pickupAddress
+      ) {
+        return NextResponse.json(
+          {
+            success: false,
+            message: "Please select a valid saved pickup address.",
+          },
+          { status: 400 },
+        );
+      }
+    } else if (update.fulfillment === "Swap Hub drop-off") {
+      update.pickupAddress = null;
+      update.pickupDate = null;
     }
 
-    const product = await Product.findByIdAndUpdate(id, update, {
-      new: true,
-      runValidators: true,
-    });
+    const product = await Product.findOneAndUpdate(
+      { _id: id, status: "AVAILABLE" },
+      update,
+      { new: true, runValidators: true },
+    );
+    if (!product) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Only available listings can be edited.",
+        },
+        { status: 409 },
+      );
+    }
+
     return NextResponse.json({
       success: true,
       message: "Product updated successfully.",
