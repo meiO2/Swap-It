@@ -1,14 +1,7 @@
 import mongoose from "mongoose";
 import GreenPointLedger, { type GreenPointTransactionType } from "@/models/GreenPointLedger";
 
-export const GREEN_POINT_REWARDS = {
-  registration: 2000,
-  donationTemporaryPerItem: 1500,
-  donationResaleQualityPerItem: 5000,
-  donationUpcyclingQualityPerItem: 3000,
-  donationSocialPerItem: 2000,
-  purchaseRate: 0.02,
-} as const;
+export { GREEN_POINT_REWARDS } from "@/lib/green-point-rewards";
 
 function expiryFrom(date: Date) {
   const expiry = new Date(date);
