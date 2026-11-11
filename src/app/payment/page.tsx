@@ -2,167 +2,239 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useState } from "react";
-import { ArrowLeft, Building2, CreditCard, Store, WalletCards } from "lucide-react";
+import { useEffect, useState } from "react";
+import {
+  ArrowLeft,
+  CheckCircle2,
+  Clock3,
+  XCircle,
+} from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
 import { apiRequest } from "@/lib/api";
 import { formatRupiah } from "@/lib/format";
 
-type PaymentMethod =
-  | "bca_va" | "bni_va" | "bri_va" | "mandiri_va" | "permata_va"
-  | "qris" | "gopay" | "shopeepay" | "indomaret" | "alfamart" | "credit_card";
+type PaymentStatus = "PENDING" | "PAID" | "FAILED" | "CANCELED" | "EXPIRED";
 
-type PaymentResponse = {
-  paymentData?: {
-    va_numbers?: Array<{ bank: string; va_number: string }>;
-    permata_va_number?: string;
-    bill_key?: string;
-    biller_code?: string;
-    actions?: Array<{ name: string; method: string; url: string }>;
-  };
+type Payment = {
+  _id?: string;
+  orderId: string;
   grossAmount: number;
+  status: PaymentStatus;
+  qrCodeId?: string;
+  qrString?: string;
+  redirectUrl?: string;
 };
 
-const methods: Array<{ id: PaymentMethod; label: string; group: string }> = [
-  { id: "bca_va", label: "BCA Virtual Account", group: "Virtual Account" },
-  { id: "bni_va", label: "BNI Virtual Account", group: "Virtual Account" },
-  { id: "bri_va", label: "BRI Virtual Account", group: "Virtual Account" },
-  { id: "mandiri_va", label: "Mandiri Virtual Account", group: "Virtual Account" },
-  { id: "permata_va", label: "Permata Virtual Account", group: "Virtual Account" },
-  { id: "qris", label: "QRIS", group: "E-Wallet" },
-  { id: "gopay", label: "GoPay", group: "E-Wallet" },
-  { id: "shopeepay", label: "ShopeePay", group: "E-Wallet" },
-  { id: "credit_card", label: "Credit / Debit Card", group: "Card" },
-  { id: "indomaret", label: "Indomaret", group: "Over the Counter" },
-  { id: "alfamart", label: "Alfamart", group: "Over the Counter" },
-];
+const statusCopy: Record<PaymentStatus, { title: string; detail: string }> = {
+  PENDING: {
+    title: "Waiting for payment",
+    detail: "The status will update automatically after payment is confirmed.",
+  },
+  PAID: {
+    title: "Payment successful",
+    detail: "Your QRIS payment has been confirmed.",
+  },
+  FAILED: {
+    title: "Payment failed",
+    detail: "This payment could not be completed.",
+  },
+  CANCELED: {
+    title: "Payment canceled",
+    detail: "This order has been canceled.",
+  },
+  EXPIRED: {
+    title: "Payment expired",
+    detail: "The payment window has expired.",
+  },
+};
+
+function StatusIcon({ status }: { status: PaymentStatus }) {
+  if (status === "PAID") return <CheckCircle2 className="text-success" size={20} />;
+  if (status === "PENDING") return <Clock3 className="text-warning" size={20} />;
+  return <XCircle className="text-danger" size={20} />;
+}
 
 export default function PaymentPage() {
   const searchParams = useSearchParams();
   const orderId = searchParams.get("orderId");
-  const [selected, setSelected] = useState<PaymentMethod>("bca_va");
-  const [card, setCard] = useState({ number: "", cvv: "", month: "", year: "" });
-  const [payment, setPayment] = useState<PaymentResponse | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [payment, setPayment] = useState<Payment | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [statusError, setStatusError] = useState("");
+  const [pollingTimedOut, setPollingTimedOut] = useState(false);
+  const displayError = orderId ? error : "Order ID is missing.";
 
-  async function pay() {
-    if (!orderId) {
-      setError("Order ID is missing.");
-      return;
-    }
-    setLoading(true);
-    setError("");
-    try {
-      let tokenId: string | undefined;
-      if (selected === "credit_card") {
-        const clientKey = process.env.NEXT_PUBLIC_MIDTRANS_CLIENT_KEY;
-        if (!clientKey) throw new Error("Midtrans client key is not configured.");
-        const tokenResponse = await fetch(
-          `${process.env.NEXT_PUBLIC_MIDTRANS_IS_PRODUCTION === "true" ? "https://api.midtrans.com" : "https://api.sandbox.midtrans.com"}/v2/token`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              client_key: clientKey,
-              card_number: card.number.replace(/\s/g, ""),
-              card_cvv: card.cvv,
-              card_exp_month: card.month,
-              card_exp_year: card.year,
-            }),
-          },
+  useEffect(() => {
+    if (!orderId) return;
+
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let attempts = 0;
+    const requestedOrderId = orderId;
+
+    async function checkStatus() {
+      if (!active) return;
+      attempts += 1;
+      try {
+        const payments = await apiRequest<Payment[]>(
+          `/api/payments?orderId=${encodeURIComponent(requestedOrderId)}`,
         );
-        const token = (await tokenResponse.json()) as { token_id?: string; error_messages?: string[] };
-        if (!tokenResponse.ok || !token.token_id) {
-          throw new Error(token.error_messages?.join(", ") ?? "Could not tokenize card.");
+        if (!active) return;
+        const current = payments[0];
+        if (!current) throw new Error("Payment record was not found.");
+        setPayment(current);
+        setStatusError("");
+        if (current.status === "PENDING" && attempts < 60) {
+          timer = setTimeout(() => void checkStatus(), 5000);
+        } else if (current.status === "PENDING") {
+          setPollingTimedOut(true);
         }
-        tokenId = token.token_id;
+      } catch (cause) {
+        if (active) {
+          setStatusError(cause instanceof Error ? cause.message : "Could not load payment status.");
+          if (attempts < 60) {
+            timer = setTimeout(() => void checkStatus(), 5000);
+          } else {
+            setPollingTimedOut(true);
+          }
+        }
+      } finally {
+        if (active) setLoading(false);
       }
-      const result = await apiRequest<PaymentResponse>("/api/payments", {
-        method: "POST",
-        body: JSON.stringify({ orderId, paymentMethod: selected, tokenId }),
-      });
-      setPayment(result);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Payment could not be created.");
-    } finally {
-      setLoading(false);
     }
-  }
 
-  const qrAction = payment?.paymentData?.actions?.find(
-    (item) => item.name === "generate-qr-code",
-  );
-  const paymentAction = payment?.paymentData?.actions?.find(
-    (item) => item.name === "deeplink-redirect",
-  );
+    async function createPayment() {
+      try {
+        const result = await apiRequest<Payment>("/api/payments", {
+          method: "POST",
+          body: JSON.stringify({ orderId: requestedOrderId }),
+        });
+        if (!active) return;
+        if (result.redirectUrl) {
+          window.location.assign(result.redirectUrl);
+          return;
+        }
+        setPayment(result);
+        setLoading(false);
+        await checkStatus();
+      } catch (cause) {
+        if (active) {
+          setError(
+            cause instanceof Error
+              ? cause.message
+              : "Could not create the QRIS payment code.",
+          );
+          setLoading(false);
+        }
+      }
+    }
+
+    void createPayment();
+    return () => {
+      active = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, [orderId]);
+
+  const status = payment?.status ?? "PENDING";
+  const copy = statusCopy[status];
 
   return (
     <main className="min-h-dvh px-4 pb-8 pt-5">
       <header className="mb-5 flex items-center gap-3">
-        <Link href={orderId ? `/orders/${orderId}` : "/orders"} aria-label="Back to order" className="flex size-11 items-center justify-center rounded-full text-ink-muted hover:bg-mint-50">
+        <Link
+          href={orderId ? `/orders/${orderId}` : "/orders"}
+          aria-label="Back to order"
+          className="flex size-11 items-center justify-center rounded-full text-ink-muted hover:bg-mint-50"
+        >
           <ArrowLeft size={20} />
         </Link>
         <div>
-          <h1 className="text-xl font-semibold text-ink">Choose payment method</h1>
-          <p className="text-xs text-ink-muted">Secure payment powered by Midtrans</p>
+          <h1 className="text-xl font-semibold text-ink">QRIS payment</h1>
+          <p className="text-xs text-ink-muted">Complete your payment on this page</p>
         </div>
       </header>
 
-      <section className="rounded-3xl bg-white p-4 shadow-card">
-        {["Virtual Account", "E-Wallet", "Card", "Over the Counter"].map((group) => (
-          <div key={group} className="mb-5 last:mb-0">
-            <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-muted">{group}</h2>
-            <div className="grid gap-2">
-              {methods.filter((method) => method.group === group).map((method) => (
-                <button key={method.id} type="button" onClick={() => setSelected(method.id)} className={`flex min-h-12 items-center gap-3 rounded-2xl border px-3 text-left text-sm ${selected === method.id ? "border-primary bg-mint-50 text-primary" : "border-border text-ink"}`}>
-                  {method.group === "Virtual Account" ? <Building2 size={18} /> : method.group === "E-Wallet" ? <WalletCards size={18} /> : method.group === "Card" ? <CreditCard size={18} /> : <Store size={18} />}
-                  <span className="font-medium">{method.label}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        ))}
+      <section className="mx-auto max-w-md rounded-3xl bg-white p-5 shadow-card">
+        <div className="rounded-2xl bg-mint-50 p-4 text-center">
+          <p className="text-xs font-medium text-ink-muted">Total due</p>
+          <p className="mt-1 text-2xl font-bold text-primary">
+            {formatRupiah(payment?.grossAmount ?? 0)}
+          </p>
+          <p className="mt-2 text-xs font-semibold text-primary">
+            QRIS is the only available payment method
+          </p>
+        </div>
 
-        {selected === "credit_card" && (
-          <div className="mt-4 space-y-3 rounded-2xl bg-mint-50 p-3">
-            <input className="form-input" placeholder="Card number" value={card.number} onChange={(event) => setCard({ ...card, number: event.target.value })} inputMode="numeric" />
-            <div className="grid grid-cols-3 gap-2">
-              <input className="form-input" placeholder="MM" value={card.month} onChange={(event) => setCard({ ...card, month: event.target.value })} inputMode="numeric" />
-              <input className="form-input" placeholder="YY" value={card.year} onChange={(event) => setCard({ ...card, year: event.target.value })} inputMode="numeric" />
-              <input className="form-input" placeholder="CVV" value={card.cvv} onChange={(event) => setCard({ ...card, cvv: event.target.value })} inputMode="numeric" type="password" />
+        {displayError ? (
+          <p role="alert" className="mt-4 rounded-xl bg-danger/10 p-3 text-xs text-danger">
+            {displayError}
+          </p>
+        ) : payment?.qrString && status === "PENDING" ? (
+          <>
+            <div className="mx-auto mt-5 flex w-fit rounded-2xl border border-border bg-white p-3">
+              <QRCodeSVG
+                value={payment.qrString}
+                size={240}
+                level="M"
+                title="QRIS payment code"
+                className="h-auto max-w-full"
+              />
+            </div>
+            <p className="mt-4 text-center text-sm font-semibold text-ink">
+              Scan this QR code to pay
+            </p>
+            <p className="mt-1 text-center text-xs leading-relaxed text-ink-muted">
+              Open a mobile banking or e-wallet app that supports QRIS and scan
+              the code above. Confirm the amount before completing payment.
+            </p>
+          </>
+        ) : loading ? (
+          <p role="status" className="py-8 text-center text-sm text-ink-muted">
+            Preparing your QRIS code…
+          </p>
+        ) : null}
+
+        {payment && !displayError && (
+          <div
+            role="status"
+            className="mt-5 flex items-start gap-3 rounded-2xl border border-border p-4"
+          >
+            <StatusIcon status={status} />
+            <div>
+              <p className="text-sm font-semibold text-ink">{copy.title}</p>
+              <p className="mt-1 text-xs leading-relaxed text-ink-muted">
+                {copy.detail}
+              </p>
+              {status === "PENDING" && (
+                <p className="mt-2 text-xs text-ink-muted">
+                  {pollingTimedOut
+                    ? "Confirmation is taking longer than expected. Do not pay again; the status will update when Xendit confirms the payment."
+                    : "No need to check manually. We are checking the payment status automatically."}
+                </p>
+              )}
+              {statusError && (
+                <p className="mt-2 text-xs text-danger">{statusError}</p>
+              )}
             </div>
           </div>
         )}
-
-        {error && <p role="alert" className="mt-4 rounded-xl bg-danger/10 p-3 text-xs text-danger">{error}</p>}
-        {payment && (
-          <div className="mt-4 rounded-2xl bg-mint-50 p-4 text-sm text-ink">
-            <p className="font-semibold">Payment created</p>
-            <p className="mt-1 text-xs text-ink-muted">Amount: {formatRupiah(payment.grossAmount)}</p>
-            {payment.paymentData?.va_numbers?.map((item) => <p key={item.va_number} className="mt-3 font-semibold">{item.bank.toUpperCase()} VA: {item.va_number}</p>)}
-            {payment.paymentData?.permata_va_number && <p className="mt-3 font-semibold">Permata VA: {payment.paymentData.permata_va_number}</p>}
-            {payment.paymentData?.bill_key && <p className="mt-3 font-semibold">Bill key: {payment.paymentData.bill_key}</p>}
-            {selected === "qris" && qrAction && (
-              <div className="mt-4 rounded-2xl bg-white p-4 text-center">
-                <p className="text-xs font-semibold text-ink">Scan this QR code to pay</p>
-                <img
-                  src={qrAction.url}
-                  alt="QRIS payment code"
-                  className="mx-auto mt-3 size-56 max-w-full rounded-lg"
-                />
-              </div>
-            )}
-            {selected !== "qris" && paymentAction && (
-              <a className="mt-3 inline-flex items-center gap-2 font-semibold text-primary" href={paymentAction.url} target="_blank" rel="noreferrer">
-                <WalletCards size={16} /> Open payment
-              </a>
-            )}
-            <Link href={`/payment/result?orderId=${orderId}`} className="mt-4 block text-xs font-semibold text-primary">Check payment status</Link>
-          </div>
-        )}
-
-        {!payment && <button type="button" onClick={() => void pay()} disabled={loading} className="mt-5 h-12 w-full rounded-full bg-primary text-sm font-semibold text-white shadow-primary disabled:opacity-60">{loading ? "Creating payment..." : "Continue payment"}</button>}
       </section>
+
+      <div className="mx-auto mt-4 grid max-w-md gap-2">
+        <Link
+          href={`/orders/${orderId ?? ""}`}
+          className="flex min-h-11 items-center justify-center rounded-full bg-primary text-sm font-semibold text-white"
+        >
+          View order
+        </Link>
+        <Link
+          href="/payments"
+          className="flex min-h-11 items-center justify-center rounded-full border border-border bg-white text-sm font-semibold text-ink"
+        >
+          Payment history
+        </Link>
+      </div>
     </main>
   );
 }

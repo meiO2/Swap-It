@@ -3,17 +3,17 @@ import mongoose from "mongoose";
 import { requireAuth } from "@/lib/authorization";
 import { connectDB } from "@/lib/mongodb";
 import {
-  chargeCoreTransaction,
-  createSnapTransaction,
-  getMidtransTransactionStatus,
-  type CorePaymentMethod,
-} from "@/lib/midtrans";
+  createXenditQrCode,
+  getXenditQrCode,
+  getXenditPaymentSession,
+  type XenditQrCode,
+} from "@/lib/xendit";
 import Cart from "@/models/Cart";
 import Order from "@/models/Order";
 import Payment from "@/models/Payment";
 import Product from "@/models/Product";
-import User from "@/models/User";
 import { awardGreenPoints, GREEN_POINT_REWARDS } from "@/lib/green-points";
+import { createNotificationsForMany } from "@/lib/notifications";
 
 export async function POST(request: NextRequest) {
   try {
@@ -52,28 +52,27 @@ export async function POST(request: NextRequest) {
     }
 
     const existing = await Payment.findOne({ orderId: order._id }).lean();
-    if (existing?.status === "PENDING" && existing.snapToken && !body?.paymentMethod) {
+    if (existing?.status === "PENDING" && existing.xenditQrString) {
       return NextResponse.json({
         success: true,
         data: {
           paymentId: existing._id,
           orderId: existing.orderId,
           status: existing.status,
-          snapToken: existing.snapToken,
-          redirectUrl: existing.redirectUrl,
+          qrCodeId: existing.xenditQrCodeId,
+          qrString: existing.xenditQrString,
           grossAmount: existing.grossAmount,
         },
       });
     }
-    if (existing?.status === "PENDING" && existing.paymentData && body?.paymentMethod) {
+    if (existing?.status === "PENDING" && existing.redirectUrl) {
       return NextResponse.json({
         success: true,
         data: {
           paymentId: existing._id,
           orderId: existing.orderId,
           status: existing.status,
-          paymentType: existing.paymentType,
-          paymentData: existing.paymentData,
+          redirectUrl: existing.redirectUrl,
           grossAmount: existing.grossAmount,
         },
       });
@@ -85,150 +84,30 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const user = await User.findById(auth.user.id).select("name email").lean();
-    if (!user) {
-      return NextResponse.json(
-        { success: false, message: "Buyer account not found." },
-        { status: 404 },
-      );
-    }
-
-    const midtransOrderId = `swapit-${order._id.toString()}`;
-    const itemDetails = order.items.map((item) => ({
-      id: item.productId.toString(),
-      price: item.price,
-      quantity: 1,
-      name: item.name,
-    }));
-    if (order.shippingFee > 0) {
-      itemDetails.push({
-        id: "shipping",
-        price: order.shippingFee,
-        quantity: 1,
-        name: "Shipping fee",
-      });
-    }
-    if (order.serviceFee > 0) {
-      itemDetails.push({
-        id: "service-fee",
-        price: order.serviceFee,
-        quantity: 1,
-        name: "Service fee",
-      });
-    }
-    if (order.gpUsed > 0) {
-      itemDetails.push({
-        id: "green-points",
-        price: -order.gpUsed,
-        quantity: 1,
-        name: "Green Points discount",
-      });
-    }
-
-    const customPaymentMethod = body?.paymentMethod as CorePaymentMethod | undefined;
-    if (customPaymentMethod) {
-      const supportedMethods: CorePaymentMethod[] = [
-        "bca_va", "bni_va", "bri_va", "mandiri_va", "permata_va",
-        "qris", "gopay", "shopeepay", "indomaret", "alfamart", "credit_card",
-      ];
-      if (!supportedMethods.includes(customPaymentMethod)) {
-        return NextResponse.json(
-          { success: false, message: "Unsupported payment method." },
-          { status: 400 },
-        );
-      }
-      let charge;
+    const referenceId = `swapit-${order._id.toString()}`;
+    let qrCode: XenditQrCode;
+    try {
+      const callbackUrl = `${new URL(request.url).origin}/api/payments/webhook`;
       try {
-        charge = await chargeCoreTransaction({
-          orderId: midtransOrderId,
-          grossAmount: order.totalAmount,
-          paymentMethod: customPaymentMethod,
-          tokenId: typeof body.tokenId === "string" ? body.tokenId : undefined,
-          itemDetails,
-          customer: { firstName: user.name, email: user.email },
+        qrCode = await createXenditQrCode({
+          externalId: referenceId,
+          callbackUrl,
+          amount: order.totalAmount,
         });
       } catch (error) {
-        const session = await mongoose.startSession();
-        try {
-          await session.withTransaction(async () => {
-            await Order.updateOne(
-              { _id: order._id, status: "PENDING_PAYMENT" },
-              { $set: { status: "CANCELLED" } },
-              { session },
-            );
-            await Product.updateMany(
-              { _id: { $in: order.items.map((item) => item.productId) }, status: "RESERVED" },
-              { $set: { status: "AVAILABLE" } },
-              { session },
-            );
-            await Cart.findOneAndUpdate(
-              { userId: auth.user.id },
-              {
-                $setOnInsert: { userId: auth.user.id },
-                $addToSet: {
-                  items: {
-                    $each: order.items.map((item) => ({ productId: item.productId, addedAt: new Date() })),
-                  },
-                },
-              },
-              { upsert: true, session },
-            );
-            if (order.gpUsed > 0) {
-              await awardGreenPoints({
-                userId: auth.user.id,
-                amount: order.gpUsed,
-                type: "REFUND",
-                description: "Green Points returned after payment creation failed",
-                referenceKey: `order:${order._id.toString()}:gp-refund`,
-                session,
-              });
-            }
-          });
-        } finally {
-          await session.endSession();
+        const existingQrCode = await getXenditQrCode(referenceId).catch(() => null);
+        if (
+          !existingQrCode ||
+          existingQrCode.external_id !== referenceId ||
+          existingQrCode.amount !== order.totalAmount
+        ) {
+          throw error;
         }
-        throw error;
+        qrCode = existingQrCode;
       }
-      const payment = await Payment.findOneAndUpdate(
-        { orderId: order._id },
-        {
-          $set: {
-            userId: order.buyerId,
-            midtransOrderId,
-            grossAmount: order.totalAmount,
-            status: "PENDING",
-            transactionId: charge.transaction_id,
-            paymentType: charge.payment_type ?? customPaymentMethod,
-            paymentData: charge,
-          },
-        },
-        { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true },
-      );
-      return NextResponse.json({
-        success: true,
-        data: {
-          paymentId: payment._id,
-          orderId: payment.orderId,
-          status: payment.status,
-          paymentType: payment.paymentType,
-          paymentData: payment.paymentData,
-          grossAmount: payment.grossAmount,
-        },
-      });
-    }
-
-    let snap;
-    try {
-      snap = await createSnapTransaction({
-        orderId: midtransOrderId,
-        grossAmount: order.totalAmount,
-        itemDetails,
-        customer: {
-          firstName: user.name,
-          email: user.email,
-        },
-        finishUrl: `${new URL(request.url).origin}/payment/result?orderId=${order._id.toString()}`,
-      });
+      if (!qrCode.qr_string) {
+        throw new Error("Xendit did not return a QRIS payment code.");
+      }
     } catch (error) {
       const session = await mongoose.startSession();
       try {
@@ -280,11 +159,18 @@ export async function POST(request: NextRequest) {
       {
         $set: {
           userId: order.buyerId,
-          midtransOrderId,
+          // Keep the existing unique MongoDB index populated during migration.
+          midtransOrderId: referenceId,
+          xenditQrCodeId: qrCode.id,
+          xenditQrString: qrCode.qr_string,
+          xenditReferenceId: qrCode.external_id,
           grossAmount: order.totalAmount,
           status: "PENDING",
-          snapToken: snap.token,
-          redirectUrl: snap.redirect_url,
+        },
+        $unset: {
+          xenditSessionId: 1,
+          xenditPaymentRequestId: 1,
+          redirectUrl: 1,
         },
       },
       { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true },
@@ -296,8 +182,8 @@ export async function POST(request: NextRequest) {
         paymentId: payment._id,
         orderId: payment.orderId,
         status: payment.status,
-        snapToken: payment.snapToken,
-        redirectUrl: payment.redirectUrl,
+        qrCodeId: payment.xenditQrCodeId,
+        qrString: payment.xenditQrString,
         grossAmount: payment.grossAmount,
       },
     });
@@ -335,65 +221,169 @@ export async function GET(request: NextRequest) {
       .sort({ createdAt: -1 })
       .lean();
 
-    const pending = payments.find((payment) => payment.status === "PENDING");
+    const pending = payments.find(
+      (payment) =>
+        payment.status === "PENDING" &&
+        (payment.xenditSessionId || payment.xenditQrCodeId),
+    );
     if (pending) {
       try {
-        const status = await getMidtransTransactionStatus(pending.midtransOrderId);
-        const isPaid =
-          status.transaction_status === "settlement" ||
-          (status.transaction_status === "capture" &&
-            status.fraud_status !== "challenge");
-        const finalStatus = isPaid
-          ? "PAID"
-          : status.transaction_status === "expire"
-            ? "EXPIRED"
-            : status.transaction_status === "cancel" || status.transaction_status === "deny"
-              ? "CANCELED"
-              : "PENDING";
+        let finalStatus: "PAID" | "EXPIRED" | "PENDING";
+        let transactionId: string | undefined;
+        let paymentRequestId: string | undefined;
+        if (pending.xenditSessionId) {
+          const session = await getXenditPaymentSession(pending.xenditSessionId);
+          if (
+            session.reference_id !== pending.xenditReferenceId ||
+            session.amount !== pending.grossAmount
+          ) {
+            throw new Error("Xendit payment session does not match the stored order.");
+          }
+          finalStatus =
+            session.status === "COMPLETED"
+              ? "PAID"
+              : session.status === "EXPIRED"
+                ? "EXPIRED"
+                : "PENDING";
+          transactionId = session.payment_id ?? undefined;
+          paymentRequestId =
+            session.latest_payment_request_id ??
+            session.payment_request_id ??
+            undefined;
+        } else if (pending.xenditReferenceId && pending.xenditQrCodeId) {
+          const qrCode = await getXenditQrCode(pending.xenditReferenceId);
+          if (
+            qrCode.external_id !== pending.xenditReferenceId ||
+            qrCode.id !== pending.xenditQrCodeId ||
+            qrCode.amount !== pending.grossAmount
+          ) {
+            throw new Error("Xendit QR code does not match the stored order.");
+          }
+          finalStatus = qrCode.status === "INACTIVE" ? "PAID" : "PENDING";
+        } else {
+          throw new Error("Xendit payment reference is missing.");
+        }
 
         if (finalStatus !== "PENDING") {
-          await Payment.updateOne(
-            { _id: pending._id, status: "PENDING" },
-            {
-              $set: {
-                status: finalStatus,
-                transactionId: status.transaction_id,
-                paymentType: status.payment_type,
-                paidAt: finalStatus === "PAID" ? new Date() : undefined,
-              },
-            },
-          );
-          const handoverDeadline = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
-          await Order.updateOne(
-            { _id: pending.orderId, status: "PENDING_PAYMENT" },
-            { $set: finalStatus === "PAID" ? {
-              status: "AWAITING_SELLER_HANDOVER",
-              "items.$[].handover.status": "AWAITING_SELLER_SCHEDULE",
-              "items.$[].handoverDeadline": handoverDeadline,
-            } : { status: finalStatus === "EXPIRED" ? "EXPIRED" : "CANCELLED" } },
-          );
-          if (finalStatus === "PAID") {
-            const paidOrder = await Order.findById(pending.orderId).lean();
-            if (paidOrder) {
-              await Product.updateMany(
-                { _id: { $in: paidOrder.items.map((item) => item.productId) }, status: "RESERVED" },
-                { $set: { status: "SOLD_PENDING_HANDOVER" } },
+          const session = await mongoose.startSession();
+          try {
+            await session.withTransaction(async () => {
+              const updated = await Payment.findOneAndUpdate(
+                { _id: pending._id, status: "PENDING" },
+                {
+                  $set: {
+                    status: finalStatus,
+                    transactionId,
+                    xenditPaymentRequestId: paymentRequestId,
+                    paidAt: finalStatus === "PAID" ? new Date() : undefined,
+                  },
+                },
+                { new: true, session },
               );
-              const reward = Math.floor(paidOrder.subtotal * GREEN_POINT_REWARDS.purchaseRate);
-              if (reward > 0) {
-                await awardGreenPoints({
-                  userId: paidOrder.buyerId.toString(),
-                  amount: reward,
-                  description: "Completed marketplace purchase reward",
-                  referenceKey: `purchase:${paidOrder._id.toString()}`,
-                });
+              if (!updated) return;
+
+              if (finalStatus === "PAID") {
+                const handoverDeadline = new Date(
+                  Date.now() + 3 * 24 * 60 * 60 * 1000,
+                );
+                await Order.updateOne(
+                  { _id: pending.orderId, status: "PENDING_PAYMENT" },
+                  {
+                    $set: {
+                      status: "AWAITING_SELLER_HANDOVER",
+                      "items.$[].handover.status": "AWAITING_SELLER_SCHEDULE",
+                      "items.$[].handoverDeadline": handoverDeadline,
+                    },
+                  },
+                  { session },
+                );
+                const paidOrder = await Order.findById(pending.orderId)
+                  .session(session)
+                  .lean();
+                if (paidOrder) {
+                  await Product.updateMany(
+                    {
+                      _id: { $in: paidOrder.items.map((item) => item.productId) },
+                      status: "RESERVED",
+                    },
+                    { $set: { status: "SOLD_PENDING_HANDOVER" } },
+                    { session },
+                  );
+                  const sellerIds = [
+                    ...new Set(
+                      paidOrder.items.map((item) => item.sellerId.toString()),
+                    ),
+                  ];
+                  await createNotificationsForMany({
+                    recipientIds: sellerIds,
+                    senderId: paidOrder.buyerId.toString(),
+                    type: "ORDER_UPDATE",
+                    title: "New order received",
+                    message:
+                      "A buyer has placed an order for your product. Please choose drop-off or pickup and hand it over within 3 calendar days.",
+                    link: "/orders",
+                    session,
+                  });
+                  const reward = Math.floor(
+                    paidOrder.subtotal * GREEN_POINT_REWARDS.purchaseRate,
+                  );
+                  if (reward > 0) {
+                    await awardGreenPoints({
+                      userId: paidOrder.buyerId.toString(),
+                      amount: reward,
+                      description: "Completed marketplace purchase reward",
+                      referenceKey: `purchase:${paidOrder._id.toString()}`,
+                      session,
+                    });
+                  }
+                }
+              } else {
+                await Order.updateOne(
+                  { _id: pending.orderId, status: "PENDING_PAYMENT" },
+                  { $set: { status: "EXPIRED" } },
+                  { session },
+                );
+                const cancelledOrder = await Order.findById(pending.orderId)
+                  .session(session);
+                if (cancelledOrder) {
+                  await createNotificationsForMany({
+                    recipientIds: [cancelledOrder.buyerId.toString()],
+                    type: "ORDER_UPDATE",
+                    title: "Payment expired",
+                    message:
+                      "Your payment has expired. Your order has been cancelled.",
+                    link: "/orders",
+                    session,
+                  });
+                }
+                await Product.updateMany(
+                  {
+                    _id:
+                      cancelledOrder?.items.map((item) => item.productId) ?? [],
+                    status: "RESERVED",
+                  },
+                  { $set: { status: "AVAILABLE" } },
+                  { session },
+                );
+                if (cancelledOrder && (cancelledOrder.gpUsed ?? 0) > 0) {
+                  await awardGreenPoints({
+                    userId: cancelledOrder.buyerId.toString(),
+                    amount: cancelledOrder.gpUsed ?? 0,
+                    type: "REFUND",
+                    description: "Green Points returned after payment expiration",
+                    referenceKey: `order:${cancelledOrder._id.toString()}:gp-refund`,
+                    session,
+                  });
+                }
               }
-            }
+            });
+          } finally {
+            await session.endSession();
           }
           payments = await Payment.find(query).sort({ createdAt: -1 }).lean();
         }
       } catch (error) {
-        console.error("Could not synchronize Midtrans payment status.", error);
+        console.error("Could not synchronize Xendit payment status.", error);
       }
     }
 

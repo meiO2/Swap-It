@@ -32,23 +32,13 @@ community messaging, and Revamp! upcycled merchandise in one Next.js app.
 
 ### Payments
 
-- Midtrans Snap compatibility.
-- Custom payment-method selection UI.
-- Midtrans Core API support for:
-  - BCA, BNI, BRI, Mandiri, and Permata Virtual Account
-  - QRIS
-  - GoPay
-  - ShopeePay
-  - Credit/debit card tokenization
-  - Indomaret
-  - Alfamart
+- Dynamic Xendit QRIS displayed directly on the Swap-It payment page.
 - Payment status polling and webhook verification.
 - Idempotent payment updates.
 - Failed or expired payments release products and refund redeemed Green
   Points.
 
-Payment methods still depend on the merchant account configuration and
-availability in Midtrans Sandbox or Production.
+Checkout is restricted to QRIS. QRIS must be enabled for the Xendit account.
 
 ### Green Points
 
@@ -108,7 +98,7 @@ The ledger supports `EARN`, `REDEEM`, `REFUND`, `EXPIRE`, `ADJUSTMENT`, and
 - MongoDB with Mongoose
 - Tailwind CSS 4
 - Zustand for legacy/local UI state and persisted Hub session state
-- Midtrans Snap and Core API
+- Xendit QR Codes
 - Biteship shipping API
 - Resend email delivery
 - Leaflet and React Leaflet for maps
@@ -144,7 +134,7 @@ src/
 - Node.js compatible with the installed Next.js version.
 - npm.
 - MongoDB database.
-- Midtrans account for payment testing.
+- Xendit account for payment testing.
 - Optional Biteship account for real shipping rates.
 - Optional Resend account for verification email delivery.
 
@@ -174,10 +164,8 @@ Create a local `.env` file. Never commit real credentials.
 MONGODB_URI=mongodb://...
 OTP_SECRET=...
 
-MIDTRANS_SERVER_KEY=...
-NEXT_PUBLIC_MIDTRANS_CLIENT_KEY=...
-MIDTRANS_IS_PRODUCTION=false
-NEXT_PUBLIC_MIDTRANS_IS_PRODUCTION=false
+XENDIT_SECRET_KEY=...
+XENDIT_CALLBACK_TOKEN=...
 
 SHIPPING_MODE=mock
 BITESHIP_API_KEY=...
@@ -195,11 +183,15 @@ CLOUDINARY_API_SECRET=...
 
 - `MONGODB_URI` is required for database-backed features.
 - `OTP_SECRET` signs email-verification OTP data.
-- `MIDTRANS_SERVER_KEY` is server-only and must never be exposed to the
-  browser.
-- `NEXT_PUBLIC_MIDTRANS_CLIENT_KEY` is used only for browser-side card
-  tokenization.
-- `MIDTRANS_IS_PRODUCTION=false` uses Midtrans Sandbox.
+- `XENDIT_SECRET_KEY` is server-only. Use a test/development key while
+  testing and a production key only after completing Xendit account setup.
+  The key needs Money-in Write permission and QRIS must be enabled.
+- `XENDIT_CALLBACK_TOKEN` is the webhook verification token from the Xendit
+  Dashboard and must also remain server-side.
+- In the Xendit Dashboard, set the QR Code paid callback to
+  `https://<your-domain>/api/payments/webhook`. Copy its callback verification
+  token into `XENDIT_CALLBACK_TOKEN`.
+- Xendit dynamic QRIS transactions must be between Rp1.500 and Rp10.000.000.
 - `SHIPPING_MODE=mock` is the default development mode.
 - Set `SHIPPING_MODE=biteship` to use Biteship.
 - Biteship API keys must remain server-side.
@@ -302,26 +294,14 @@ shipping, GP redemption, and total amount from server-side data.
 ### Payments
 
 - `POST /api/payments`
-  - Snap fallback body: `{ "orderId": "..." }`
-  - Custom Core API body: `{ "orderId": "...", "paymentMethod": "qris" }`
+  - Request body: `{ "orderId": "..." }`
+  - Creates one dynamic QRIS code and returns its QR string for inline display.
 - `GET /api/payments`
-- `POST /api/payments/webhook`
+- `POST /api/payments/webhook` receives Xendit QR payment callbacks.
 
-Supported custom payment method identifiers:
-
-```text
-bca_va
-bni_va
-bri_va
-mandiri_va
-permata_va
-qris
-gopay
-shopeepay
-credit_card
-indomaret
-alfamart
-```
+QRIS must be enabled for the merchant account. Cash refunds use Xendit's refund
+API when the original payment channel supports API refunds; any rejected refund
+is recorded as failed for manual follow-up.
 
 ### Green Points
 
@@ -376,23 +356,27 @@ the rate before saving the order.
 1. Checkout creates a pending order.
 2. Product records are reserved and the cart is cleared.
 3. GP redemption is written to the ledger.
-4. The user selects a payment method.
-5. Midtrans receives the server-calculated total.
-6. Midtrans webhook or status polling updates the payment.
+4. The server creates a dynamic Xendit QRIS code using the stored order total.
+5. The QRIS code and amount appear on the Swap-It payment page.
+6. Xendit webhook or status polling updates the payment automatically.
 7. Paid orders award the purchase GP reward.
-8. Failed, cancelled, or expired payments release products and refund GP.
+8. Expired payments release products and refund GP; failed attempts can be
+   retried by creating a new order.
 
-Payment item details include products, shipping, service fees, and GP
-discounts so the Midtrans gross amount remains consistent.
+The amount sent to Xendit is calculated from the stored order, including
+shipping, service fees, and redeemed Green Points.
+
+Before deploying this provider change, complete or cancel any outstanding
+Midtrans payments; the payment webhook now handles Xendit QR payment events.
 
 ## Security and operational notes
 
 - Keep `.env` out of version control.
 - Rotate credentials if they are ever exposed.
-- Never send `MIDTRANS_SERVER_KEY`, Biteship keys, MongoDB credentials, or
-  OTP secrets to the client.
+- Never send Xendit keys, Biteship keys, MongoDB credentials, or OTP secrets
+  to the client.
 - Treat frontend prices and GP values as untrusted input.
-- Payment webhooks verify the Midtrans SHA-512 signature and amount.
+- Payment webhooks verify the Xendit callback token and order amount.
 - Ledger `referenceKey` values provide idempotency for rewards, redemption,
   and refunds.
 - Local uploads under `public/uploads` are suitable for development, not

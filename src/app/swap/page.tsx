@@ -6,10 +6,12 @@ import { AnimatePresence, motion } from "framer-motion";
 import { ArrowLeft, Heart, MapPin, RotateCcw, ShieldCheck, X } from "lucide-react";
 import { useState } from "react";
 import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 import type { Product } from "@/data/mock";
 import { mapApiProduct, type ApiProduct } from "@/lib/products";
 
 export default function SwapPage() {
+  const router = useRouter();
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -18,12 +20,39 @@ export default function SwapPage() {
   const [direction, setDirection] = useState(0);
   const [pendingMatch, setPendingMatch] = useState(false);
   const [isExiting, setIsExiting] = useState(false);
+  const [startingConversation, setStartingConversation] = useState(false);
+  const [conversationError, setConversationError] = useState("");
   useEffect(() => {
-    fetch("/api/products?limit=50")
-      .then(async (response) => {
-        const result = await response.json() as { success: boolean; data?: ApiProduct[] };
-        if (!response.ok || !result.success) throw new Error("Failed to load products.");
-        setProducts((result.data ?? []).map(mapApiProduct));
+    Promise.all([
+      fetch("/api/products?limit=50"),
+      fetch("/api/auth/me").catch(() => null),
+    ])
+      .then(async ([productsResponse, userResponse]) => {
+        const result = await productsResponse.json() as {
+          success: boolean;
+          data?: ApiProduct[];
+          message?: string;
+        };
+        if (!productsResponse.ok || !result.success) {
+          throw new Error(result.message || "Failed to load products.");
+        }
+
+        let authenticatedUserId = "";
+        if (userResponse?.ok) {
+          const userResult = await userResponse.json() as {
+            success: boolean;
+            data?: { id?: string };
+          };
+          if (userResult.success && userResult.data?.id) {
+            authenticatedUserId = userResult.data.id;
+          }
+        }
+
+        setProducts(
+          (result.data ?? [])
+            .map(mapApiProduct)
+            .filter((product) => product.sellerId !== authenticatedUserId),
+        );
       })
       .catch((error) => console.error("Swap products error:", error))
       .finally(() => setLoading(false));
@@ -63,6 +92,41 @@ export default function SwapPage() {
   }
 
   const matchedItem = matchedProduct ?? activeProduct;
+
+  async function messageSeller() {
+    if (!matchedItem.sellerId || startingConversation) {
+      setConversationError("This listing does not have a valid seller account.");
+      return;
+    }
+
+    setStartingConversation(true);
+    setConversationError("");
+    try {
+      const response = await fetch("/api/conversations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ recipientId: matchedItem.sellerId }),
+      });
+      const result = await response.json() as {
+        success: boolean;
+        data?: { _id: string };
+        message?: string;
+      };
+      if (!response.ok || !result.success || !result.data?._id) {
+        throw new Error(result.message || "Could not start this conversation.");
+      }
+
+      router.push(
+        `/chat/${result.data._id}?product=${encodeURIComponent(matchedItem.id)}`,
+      );
+    } catch (error) {
+      setConversationError(
+        error instanceof Error ? error.message : "Could not start this conversation.",
+      );
+      setStartingConversation(false);
+    }
+  }
 
   return (
     <main className="px-4 pb-6 pt-5">
@@ -156,9 +220,21 @@ export default function SwapPage() {
         <div className="fixed inset-0 z-50 mx-auto flex max-w-[430px] items-center justify-center bg-ink/45 p-5" role="presentation">
           <section aria-labelledby="match-title" aria-modal="true" role="dialog" className="w-full rounded-3xl bg-white p-6 text-center shadow-card">
             <span className="mx-auto flex size-16 items-center justify-center rounded-full bg-mint-100 text-primary"><Heart size={30} fill="currentColor" /></span>
-            <h2 id="match-title" className="mt-4 text-2xl font-bold text-ink">It&apos;s a match!</h2>
-            <p className="mt-2 text-sm text-ink-muted">You both liked something from each other.</p>
-            <Link href={`/chat/${matchedItem.seller === "Raka Aditya" ? "raka" : "nadia"}?product=${matchedItem.id}`} className="mt-5 flex h-11 items-center justify-center rounded-full bg-primary text-sm font-semibold text-white shadow-primary hover:bg-primary-dark">Say hello</Link>
+            <h2 id="match-title" className="mt-4 text-2xl font-bold text-ink">Interested in this item?</h2>
+            <p className="mt-2 text-sm text-ink-muted">You liked this listing. Start a conversation with the seller to discuss a swap.</p>
+            {conversationError && (
+              <p role="alert" className="mt-3 text-xs text-danger">
+                {conversationError}
+              </p>
+            )}
+            <button
+              type="button"
+              onClick={() => void messageSeller()}
+              disabled={startingConversation}
+              className="mt-5 flex h-11 w-full items-center justify-center rounded-full bg-primary text-sm font-semibold text-white shadow-primary hover:bg-primary-dark disabled:opacity-60"
+            >
+              {startingConversation ? "Opening chat..." : "Message seller"}
+            </button>
             <button type="button" onClick={() => setMatched(false)} className="mt-3 h-10 w-full rounded-full text-sm font-semibold text-ink-muted hover:bg-mint-50">Keep browsing</button>
           </section>
         </div>

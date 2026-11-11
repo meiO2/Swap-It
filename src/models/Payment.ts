@@ -11,7 +11,12 @@ export interface IPayment {
   orderId: mongoose.Types.ObjectId;
   userId: mongoose.Types.ObjectId;
   transactionId?: string;
-  midtransOrderId: string;
+  midtransOrderId?: string;
+  xenditSessionId?: string;
+  xenditQrCodeId?: string;
+  xenditQrString?: string;
+  xenditReferenceId?: string;
+  xenditPaymentRequestId?: string;
   grossAmount: number;
   paymentType?: string;
   status: PaymentStatus;
@@ -43,6 +48,11 @@ const PaymentSchema = new Schema<IPayment>(
       unique: true,
       index: true,
     },
+    xenditSessionId: { type: String, unique: true, sparse: true, index: true },
+    xenditQrCodeId: { type: String, unique: true, sparse: true, index: true },
+    xenditQrString: { type: String },
+    xenditReferenceId: { type: String, unique: true, sparse: true, index: true },
+    xenditPaymentRequestId: { type: String, trim: true },
     grossAmount: { type: Number, required: true, min: 1 },
     paymentType: { type: String, trim: true },
     status: {
