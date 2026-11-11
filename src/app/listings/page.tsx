@@ -90,6 +90,8 @@ export default function ListingsPage() {
   const [products, setProducts] = useState<SellerProduct[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [unlistingId, setUnlistingId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -105,7 +107,7 @@ export default function ListingsPage() {
           setError(
             cause instanceof Error
               ? cause.message
-              : "Could not load your products.",
+              : "Could not load your products."
           );
         }
       })
@@ -119,6 +121,54 @@ export default function ListingsPage() {
       active = false;
     };
   }, []);
+
+  async function handleUnlist(product: SellerProduct) {
+    const confirmed = window.confirm(
+      `Are you sure you want to unlist "${product.name}"?\n\nIt will no longer appear in the marketplace. You can list it again later.`
+    );
+
+    if (!confirmed) return;
+
+    try {
+      setUnlistingId(product._id);
+      setActionError("");
+
+      const response = await fetch(
+        `/api/products/${product._id}`,
+        {
+          method: "DELETE",
+        }
+      );
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        throw new Error(
+          result.message || "Failed to unlist product."
+        );
+      }
+
+      setProducts((current) =>
+        current.map((item) =>
+          item._id === product._id
+            ? {
+                ...item,
+                status: "INACTIVE",
+                publishedAt: null,
+              }
+            : item
+        )
+      );
+    } catch (cause) {
+      setActionError(
+        cause instanceof Error
+          ? cause.message
+          : "Could not unlist this product."
+      );
+    } finally {
+      setUnlistingId(null);
+    }
+  }
 
   return (
     <main className="px-4 pb-6 pt-5">
@@ -160,6 +210,15 @@ export default function ListingsPage() {
         </p>
       )}
 
+      {actionError && (
+        <p
+          role="alert"
+          className="mb-3 rounded-xl bg-danger/10 p-3 text-xs text-danger"
+        >
+          {actionError}
+        </p>
+      )}
+
       {loading ? (
         <p
           role="status"
@@ -191,6 +250,8 @@ export default function ListingsPage() {
             <ProductCard
               key={product._id}
               product={product}
+              onUnlist={handleUnlist}
+              unlisting={unlistingId === product._id}
             />
           ))}
         </div>
@@ -219,16 +280,24 @@ export default function ListingsPage() {
   );
 }
 
+
 function ProductCard({
   product,
+  onUnlist,
+  unlisting,
 }: {
   product: SellerProduct;
+  onUnlist: (product: SellerProduct) => void;
+  unlisting: boolean;
 }) {
   const status = STATUS_CONFIG[product.status];
 
   return (
     <article className="rounded-2xl bg-white p-4 shadow-card transition hover:shadow-md">
-      <Link href={`/products/${product._id}`} className="block">
+      <Link
+        href={`/products/${product._id}`}
+        className="block"
+      >
         <div className="flex gap-3">
           <div className="size-24 shrink-0 overflow-hidden rounded-xl bg-mint-50">
             {product.images?.[0] ? (
@@ -305,13 +374,16 @@ function ProductCard({
       </Link>
 
       {product.status === "AVAILABLE" && (
-        <Link
-          href={`/sell?edit=${encodeURIComponent(product._id)}`}
-          className="mt-3 inline-flex items-center gap-2 rounded-full bg-mint-50 px-3 py-2 text-xs font-semibold text-primary hover:bg-mint-100"
-        >
-          <Pencil size={14} />
-          Edit listing
-        </Link>
+        <div className="mt-3 border-t border-mint-100 pt-3">
+          <button
+            type="button"
+            onClick={() => onUnlist(product)}
+            disabled={unlisting}
+            className="w-full rounded-xl border border-danger/30 px-4 py-2.5 text-xs font-semibold text-danger transition hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {unlisting ? "Unlisting..." : "Unlist product"}
+          </button>
+        </div>
       )}
     </article>
   );
