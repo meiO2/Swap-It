@@ -26,6 +26,17 @@ type XenditSessionNotification = {
   };
 };
 
+type XenditQrNotification = {
+  event?: string;
+  id?: string;
+  amount?: number;
+  qr_code?: {
+    id?: string;
+    external_id?: string;
+    type?: string;
+  };
+};
+
 function mapStatus(event: string, status?: string): PaymentStatus | null {
   if (event === "payment_session.completed" && status === "COMPLETED") {
     return "PAID";
@@ -51,33 +62,51 @@ export async function POST(request: Request) {
       );
     }
 
-    const notification =
-      (await request.json()) as XenditSessionNotification;
-    const data = notification.data;
-    const paymentSessionId = data?.payment_session_id ?? data?.id;
-    const paymentStatus = mapStatus(notification.event ?? "", data?.status);
+    const notification = (await request.json()) as
+      | XenditSessionNotification
+      | XenditQrNotification;
+    const isQrNotification = notification.event === "qr.payment";
+    const sessionNotification = isQrNotification
+      ? null
+      : (notification as XenditSessionNotification);
+    const qrNotification = isQrNotification
+      ? (notification as XenditQrNotification)
+      : null;
+    const data = sessionNotification?.data;
+    const referenceId = isQrNotification
+      ? qrNotification?.qr_code?.external_id
+      : data?.reference_id;
+    const providerPaymentId = isQrNotification
+      ? qrNotification?.qr_code?.id
+      : data?.payment_session_id ?? data?.id;
+    const amount = isQrNotification ? qrNotification?.amount : data?.amount;
+    const transactionId = isQrNotification ? qrNotification?.id : data?.payment_id;
+    const paymentStatus = isQrNotification
+      ? "PAID"
+      : mapStatus(notification.event ?? "", data?.status);
     if (
       !paymentStatus ||
-      data?.session_type !== "PAY" ||
-      typeof data?.reference_id !== "string" ||
-      typeof paymentSessionId !== "string" ||
-      typeof data.amount !== "number" ||
-      !Number.isSafeInteger(data.amount)
+      (!isQrNotification && data?.session_type !== "PAY") ||
+      typeof referenceId !== "string" ||
+      typeof providerPaymentId !== "string" ||
+      typeof amount !== "number" ||
+      !Number.isSafeInteger(amount) ||
+      (isQrNotification && qrNotification?.qr_code?.type !== "DYNAMIC")
     ) {
       return NextResponse.json(
-        { success: false, message: "Invalid Xendit payment session notification." },
+        { success: false, message: "Invalid Xendit payment notification." },
         { status: 400 },
       );
     }
 
     const prefix = "swapit-";
-    if (!data.reference_id.startsWith(prefix)) {
+    if (!referenceId.startsWith(prefix)) {
       return NextResponse.json(
         { success: false, message: "Unknown payment reference." },
         { status: 400 },
       );
     }
-    const orderId = data.reference_id.slice(prefix.length);
+    const orderId = referenceId.slice(prefix.length);
     if (!mongoose.Types.ObjectId.isValid(orderId)) {
       return NextResponse.json(
         { success: false, message: "Invalid payment order reference." },
@@ -87,8 +116,10 @@ export async function POST(request: Request) {
 
     await connectDB();
     const payment = await Payment.findOne({
-      xenditSessionId: paymentSessionId,
-      xenditReferenceId: data.reference_id,
+      ...(isQrNotification
+        ? { xenditQrCodeId: providerPaymentId }
+        : { xenditSessionId: providerPaymentId }),
+      xenditReferenceId: referenceId,
       orderId,
     });
     if (!payment) {
@@ -97,13 +128,19 @@ export async function POST(request: Request) {
         { status: 404 },
       );
     }
-    if (data.amount !== payment.grossAmount) {
+    if (amount !== payment.grossAmount) {
       return NextResponse.json(
         { success: false, message: "Payment amount mismatch." },
         { status: 400 },
       );
     }
     if (payment.status === paymentStatus || payment.status === "PAID") {
+      if (isQrNotification && payment.status === "PAID" && transactionId) {
+        await Payment.updateOne(
+          { _id: payment._id, transactionId: { $exists: false } },
+          { $set: { transactionId } },
+        );
+      }
       return NextResponse.json({
         success: true,
         message: "Notification already processed.",
@@ -118,11 +155,12 @@ export async function POST(request: Request) {
           {
             $set: {
               status: paymentStatus,
-              transactionId: data.payment_id ?? undefined,
-              xenditPaymentRequestId:
-                data.latest_payment_request_id ??
-                data.payment_request_id ??
-                undefined,
+              transactionId: transactionId ?? undefined,
+              xenditPaymentRequestId: isQrNotification
+                ? undefined
+                : data?.latest_payment_request_id ??
+                  data?.payment_request_id ??
+                  undefined,
               paidAt: paymentStatus === "PAID" ? new Date() : undefined,
             },
           },

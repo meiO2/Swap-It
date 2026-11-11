@@ -16,6 +16,14 @@ type XenditPaymentSession = {
   payment_id?: string | null;
 };
 
+export type XenditQrCode = {
+  id: string;
+  external_id: string;
+  amount: number;
+  qr_string: string;
+  status: "ACTIVE" | "INACTIVE";
+};
+
 function getSecretKey() {
   const secretKey = process.env.XENDIT_SECRET_KEY;
   if (!secretKey) throw new Error("XENDIT_SECRET_KEY is not configured.");
@@ -92,11 +100,55 @@ export function getXenditPaymentSession(sessionId: string) {
   );
 }
 
+export async function createXenditQrCode(input: {
+  externalId: string;
+  amount: number;
+  callbackUrl: string;
+}) {
+  if (!Number.isSafeInteger(input.amount) || input.amount < 1500 || input.amount > 10_000_000) {
+    throw new Error("QRIS payments must be between Rp1.500 and Rp10.000.000.");
+  }
+
+  const body = new URLSearchParams({
+    external_id: input.externalId,
+    type: "DYNAMIC",
+    callback_url: input.callbackUrl,
+    amount: String(input.amount),
+  });
+  return xenditRequest<XenditQrCode>("/qr_codes", {
+    method: "POST",
+    body,
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+  });
+}
+
+export function getXenditQrCode(externalId: string) {
+  return xenditRequest<XenditQrCode>(
+    `/qr_codes/${encodeURIComponent(externalId)}`,
+  );
+}
+
 export async function refundXenditPayment(input: {
-  paymentRequestId: string;
+  paymentRequestId?: string;
+  qrPaymentId?: string;
   referenceId: string;
   amount: number;
 }) {
+  if (input.qrPaymentId) {
+    return xenditRequest<{ id?: string; status?: string }>(
+      `/qr_codes/payments/${encodeURIComponent(input.qrPaymentId)}/refunds`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          amount: input.amount,
+          reason: "REQUESTED_BY_CUSTOMER",
+        }),
+      },
+    );
+  }
+  if (!input.paymentRequestId) {
+    throw new Error("Xendit payment reference is missing.");
+  }
   return xenditRequest<{ id?: string; status?: string }>("/refunds", {
     method: "POST",
     body: JSON.stringify({

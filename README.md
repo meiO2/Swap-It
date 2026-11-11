@@ -32,7 +32,7 @@ community messaging, and Revamp! upcycled merchandise in one Next.js app.
 
 ### Payments
 
-- Xendit Payment Sessions with Xendit-hosted QRIS checkout.
+- Dynamic Xendit QRIS displayed directly on the Swap-It payment page.
 - Payment status polling and webhook verification.
 - Idempotent payment updates.
 - Failed or expired payments release products and refund redeemed Green
@@ -87,7 +87,7 @@ The ledger supports `EARN`, `REDEEM`, `REFUND`, `EXPIRE`, `ADJUSTMENT`, and
 - MongoDB with Mongoose
 - Tailwind CSS 4
 - Zustand for legacy/local UI state and persisted Hub session state
-- Xendit Payment Sessions
+- Xendit QR Codes
 - Biteship shipping API
 - Resend email delivery
 - Leaflet and React Leaflet for maps
@@ -174,12 +174,13 @@ CLOUDINARY_API_SECRET=...
 - `OTP_SECRET` signs email-verification OTP data.
 - `XENDIT_SECRET_KEY` is server-only. Use a test/development key while
   testing and a production key only after completing Xendit account setup.
+  The key needs Money-in Write permission and QRIS must be enabled.
 - `XENDIT_CALLBACK_TOKEN` is the webhook verification token from the Xendit
   Dashboard and must also remain server-side.
-- In the Xendit Dashboard, enable the payment channels you want to offer and
-  set the Payment Session webhook URL to
+- In the Xendit Dashboard, set the QR Code paid callback to
   `https://<your-domain>/api/payments/webhook`. Copy its callback verification
   token into `XENDIT_CALLBACK_TOKEN`.
+- Xendit dynamic QRIS transactions must be between Rp1.500 and Rp10.000.000.
 - `SHIPPING_MODE=mock` is the default development mode.
 - Set `SHIPPING_MODE=biteship` to use Biteship.
 - Biteship API keys must remain server-side.
@@ -283,14 +284,13 @@ shipping, GP redemption, and total amount from server-side data.
 
 - `POST /api/payments`
   - Request body: `{ "orderId": "..." }`
-  - Returns a Xendit-hosted checkout URL.
+  - Creates one dynamic QRIS code and returns its QR string for inline display.
 - `GET /api/payments`
-- `POST /api/payments/webhook` receives Xendit Payment Session events.
+- `POST /api/payments/webhook` receives Xendit QR payment callbacks.
 
-The Xendit checkout is restricted to QRIS, which must be enabled for the
-merchant account. Cash refunds use Xendit's refund API when the original
-payment channel supports API refunds; any rejected refund is recorded as failed
-for manual follow-up.
+QRIS must be enabled for the merchant account. Cash refunds use Xendit's refund
+API when the original payment channel supports API refunds; any rejected refund
+is recorded as failed for manual follow-up.
 
 ### Green Points
 
@@ -340,20 +340,18 @@ the rate before saving the order.
 1. Checkout creates a pending order.
 2. Product records are reserved and the cart is cleared.
 3. GP redemption is written to the ledger.
-4. The server creates a Xendit Payment Session using the server-calculated
-   total.
-5. The user chooses an available payment method on Xendit's hosted checkout.
-6. Xendit webhook or status polling updates the payment.
+4. The server creates a dynamic Xendit QRIS code using the stored order total.
+5. The QRIS code and amount appear on the Swap-It payment page.
+6. Xendit webhook or status polling updates the payment automatically.
 7. Paid orders award the purchase GP reward.
 8. Expired payments release products and refund GP; failed attempts can be
-   retried on Xendit's hosted checkout.
+   retried by creating a new order.
 
 The amount sent to Xendit is calculated from the stored order, including
 shipping, service fees, and redeemed Green Points.
 
 Before deploying this provider change, complete or cancel any outstanding
-Midtrans payments; the payment webhook now handles Xendit Payment Session
-events.
+Midtrans payments; the payment webhook now handles Xendit QR payment events.
 
 ## Security and operational notes
 

@@ -13,6 +13,8 @@ export interface IPayment {
   transactionId?: string;
   midtransOrderId?: string;
   xenditSessionId?: string;
+  xenditQrCodeId?: string;
+  xenditQrString?: string;
   xenditReferenceId?: string;
   xenditPaymentRequestId?: string;
   grossAmount: number;
@@ -47,6 +49,8 @@ const PaymentSchema = new Schema<IPayment>(
       index: true,
     },
     xenditSessionId: { type: String, unique: true, sparse: true, index: true },
+    xenditQrCodeId: { type: String, unique: true, sparse: true, index: true },
+    xenditQrString: { type: String },
     xenditReferenceId: { type: String, unique: true, sparse: true, index: true },
     xenditPaymentRequestId: { type: String, trim: true },
     grossAmount: { type: Number, required: true, min: 1 },
