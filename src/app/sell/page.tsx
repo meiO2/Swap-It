@@ -5,13 +5,36 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Camera, CircleHelp } from "lucide-react";
-import { ChangeEvent, FormEvent, useEffect, useState } from "react";
+import { ChangeEvent, FormEvent, use, useEffect, useState } from "react";
 import { apiRequest } from "@/lib/api";
 import type { IUserAddress } from "@/models/User";
 
-export default function SellPage() {
-  const router = useRouter();
+type EditableProduct = {
+  _id: string;
+  name: string;
+  description: string;
+  category: string;
+  price: number;
+  size: string;
+  condition: "NEW" | "LIKE_NEW" | "GOOD" | "FAIR";
+  images: string[];
+  fulfillment: "Swap Hub drop-off" | "Pickup";
+  pickupDate?: string;
+  pickupAddress?: IUserAddress;
+  status: "AVAILABLE" | string;
+};
 
+export default function SellPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
+  const router = useRouter();
+  const search = use(searchParams);
+  const productId = typeof search.edit === "string" ? search.edit : "";
+  const [editingProduct, setEditingProduct] =
+    useState<EditableProduct | null>(null);
+  const [loadingProduct, setLoadingProduct] = useState(Boolean(productId));
   const [fulfillment, setFulfillment] = useState<
     "Swap Hub drop-off" | "Pickup"
   >("Swap Hub drop-off");
@@ -21,6 +44,30 @@ export default function SellPage() {
   const [addresses, setAddresses] = useState<IUserAddress[]>([]);
   const [addressId, setAddressId] = useState("");
   const [imagePreviews, setImagePreviews] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!productId) return;
+
+    apiRequest<EditableProduct>(
+      `/api/products/${encodeURIComponent(productId)}`,
+    )
+      .then((product) => {
+        setEditingProduct(product);
+        setFulfillment(product.fulfillment);
+        setAddressId(product.pickupAddress?.id ?? "");
+        if (product.status !== "AVAILABLE") {
+          setError("Only available listings can be edited.");
+        }
+      })
+      .catch((cause: unknown) => {
+        setError(
+          cause instanceof Error
+            ? cause.message
+            : "Could not load this product for editing.",
+        );
+      })
+      .finally(() => setLoadingProduct(false));
+  }, [productId]);
 
   useEffect(() => {
     return () => {
@@ -39,9 +86,7 @@ export default function SellPage() {
       .then((saved) => {
         setAddresses(saved);
 
-        if (saved.length) {
-          setAddressId(saved[0].id);
-        }
+        setAddressId((current) => current || saved[0]?.id || "");
       })
       .catch((cause: unknown) => {
         setError(
@@ -54,6 +99,9 @@ export default function SellPage() {
 
   async function submitProduct(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (productId && (!editingProduct || editingProduct.status !== "AVAILABLE")) {
+      return;
+    }
 
     const formData = new FormData(event.currentTarget);
 
@@ -67,6 +115,11 @@ export default function SellPage() {
     const imageFiles = formData
       .getAll("images")
       .filter((entry): entry is File => entry instanceof File && entry.size > 0);
+
+    if (imageFiles.length > 8) {
+      setError("Upload no more than 8 product images.");
+      return;
+    }
 
     const pickupDate = String(
       formData.get("pickupDate") ?? "",
@@ -83,7 +136,7 @@ export default function SellPage() {
     }
 
     if (fulfillment === "Pickup") {
-      if (!addressId) {
+      if (!addressId || !addresses.some((address) => address.id === addressId)) {
         setError(
           "Save and choose a pickup address in Settings before submitting.",
         );
@@ -110,25 +163,45 @@ export default function SellPage() {
         });
       }
 
-      await apiRequest("/api/products", {
-        method: "POST",
-        body: JSON.stringify({
-          name,
-          description,
-          category: String(formData.get("category") ?? ""),
-          size: String(formData.get("size") ?? ""),
-          condition: String(formData.get("condition") ?? ""),
-          price,
-          images: images.length > 0 ? images : undefined,
-          fulfillment,
-          pickupDate:
-            fulfillment === "Pickup" ? pickupDate : undefined,
-          pickupAddressId:
-            fulfillment === "Pickup" ? addressId : undefined,
-        }),
-      });
+      const today = new Date();
+      const todayString = [
+        today.getFullYear(),
+        String(today.getMonth() + 1).padStart(2, "0"),
+        String(today.getDate()).padStart(2, "0"),
+      ].join("-");
+      const keepPastPickupDate =
+        editingProduct?.pickupDate === pickupDate &&
+        pickupDate < todayString;
+      const productData = {
+        name,
+        description,
+        category: String(formData.get("category") ?? ""),
+        size: String(formData.get("size") ?? ""),
+        condition: String(formData.get("condition") ?? ""),
+        price,
+        ...(images.length > 0
+          ? { images }
+          : image
+            ? { images: [image] }
+            : {}),
+        fulfillment,
+        pickupDate:
+          fulfillment === "Pickup" && !keepPastPickupDate
+            ? pickupDate
+            : undefined,
+        pickupAddressId:
+          fulfillment === "Pickup" ? addressId : undefined,
+      };
 
-      router.push("/products");
+      await apiRequest(
+        productId ? `/api/products/${encodeURIComponent(productId)}` : "/api/products",
+        {
+          method: productId ? "PATCH" : "POST",
+          body: JSON.stringify(productData),
+        },
+      );
+
+      router.push(productId ? "/listings" : "/products");
       router.refresh();
     } catch (reason) {
       setError(
@@ -154,15 +227,27 @@ export default function SellPage() {
 
         <div className="text-center">
           <h1 className="text-xl font-semibold text-ink">
-            Sell a piece
+            {productId ? "Edit listing" : "Sell a piece"}
           </h1>
           <p className="text-xs text-ink-muted">
-            Give something good another chapter
+            {productId
+              ? "Update the details of your product"
+              : "Give something good another chapter"}
           </p>
         </div>
       </header>
 
-      <form onSubmit={submitProduct} className="mx-auto w-full space-y-4">
+      <form
+        key={editingProduct?._id ?? "new"}
+        onSubmit={submitProduct}
+        className="mx-auto w-full space-y-4"
+      >
+        {loadingProduct && (
+          <p role="status" className="text-center text-xs text-ink-muted">
+            Loading listing...
+          </p>
+        )}
+
         <div className="flex items-center justify-center gap-2 rounded-xl bg-mint-50 p-3 text-center text-xs text-ink-muted">
           <Camera size={17} className="shrink-0 text-primary" />
           <span>
@@ -175,7 +260,9 @@ export default function SellPage() {
             <span className="pointer-events-none">
               {imagePreviews.length > 0
                 ? `${imagePreviews.length} image${imagePreviews.length === 1 ? "" : "s"} selected`
-                : "Choose files"}
+                : editingProduct?.images.length
+                  ? `${editingProduct.images.length} current image${editingProduct.images.length === 1 ? "" : "s"}`
+                  : "Choose files"}
             </span>
             <input
               name="images"
@@ -186,9 +273,12 @@ export default function SellPage() {
               className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
             />
           </div>
-          {imagePreviews.length > 0 && (
+          {(imagePreviews.length > 0 || editingProduct?.images.length) && (
             <div className="mt-3 grid grid-cols-4 gap-2">
-              {imagePreviews.map((preview, index) => (
+              {(imagePreviews.length > 0
+                ? imagePreviews
+                : editingProduct?.images ?? []
+              ).map((preview, index) => (
                 <div key={preview} className="relative aspect-square overflow-hidden rounded-xl bg-mint-50">
                   <Image
                     src={preview}
@@ -218,7 +308,8 @@ export default function SellPage() {
           <input
             name="name"
             required
-            maxLength={70}
+            maxLength={120}
+            defaultValue={editingProduct?.name}
             placeholder="e.g. Linen blend shirt"
             className="form-input"
           />
@@ -230,6 +321,7 @@ export default function SellPage() {
             required
             maxLength={2000}
             rows={4}
+            defaultValue={editingProduct?.description}
             placeholder="Describe your item, its details, and anything buyers should know..."
             className="form-input w-full resize-none text-left"
           />
@@ -240,9 +332,23 @@ export default function SellPage() {
             <select
               name="category"
               required
+              defaultValue={editingProduct?.category ?? ""}
               className="form-input"
             >
               <option value="">Select</option>
+              {editingProduct?.category &&
+                ![
+                  "Tops",
+                  "Bottoms",
+                  "Dresses",
+                  "Outerwear",
+                  "Accessories",
+                  "Shoes",
+                ].includes(editingProduct.category) && (
+                  <option value={editingProduct.category}>
+                    {editingProduct.category}
+                  </option>
+                )}
               {[
                 "Tops",
                 "Bottoms",
@@ -257,8 +363,21 @@ export default function SellPage() {
           </Field>
 
           <Field label="Size">
-            <select name="size" required className="form-input">
+            <select
+              name="size"
+              required
+              defaultValue={editingProduct?.size ?? ""}
+              className="form-input"
+            >
               <option value="">Select</option>
+              {editingProduct?.size &&
+                !["XS", "S", "M", "L", "XL", "One size"].includes(
+                  editingProduct.size,
+                ) && (
+                  <option value={editingProduct.size}>
+                    {editingProduct.size}
+                  </option>
+                )}
               {["XS", "S", "M", "L", "XL", "One size"].map(
                 (item) => (
                   <option key={item}>{item}</option>
@@ -272,9 +391,11 @@ export default function SellPage() {
           <select
             name="condition"
             required
+            defaultValue={editingProduct?.condition ?? ""}
             className="form-input"
           >
             <option value="">Select condition</option>
+            <option value="NEW">New</option>
             <option value="LIKE_NEW">Like new</option>
             <option value="GOOD">Very good</option>
             <option value="FAIR">Good</option>
@@ -288,6 +409,7 @@ export default function SellPage() {
             min="1"
             step="1"
             required
+            defaultValue={editingProduct?.price}
             placeholder="125000"
             className="form-input"
           />
@@ -362,7 +484,14 @@ export default function SellPage() {
               <input
                 name="pickupDate"
                 type="date"
-                min={new Date().toLocaleDateString("en-CA")}
+                min={
+                  editingProduct?.pickupDate &&
+                  editingProduct.pickupDate <
+                    new Date().toLocaleDateString("en-CA")
+                    ? undefined
+                    : new Date().toLocaleDateString("en-CA")
+                }
+                defaultValue={editingProduct?.pickupDate}
                 required
                 className="form-input"
               />
@@ -390,10 +519,21 @@ export default function SellPage() {
 
         <button
           type="submit"
-          disabled={submitting}
+          disabled={
+            submitting ||
+            loadingProduct ||
+            (Boolean(productId) &&
+              (!editingProduct || editingProduct.status !== "AVAILABLE"))
+          }
           className="h-12 w-full rounded-full bg-primary text-sm font-semibold text-white shadow-primary hover:bg-primary-dark disabled:opacity-60"
         >
-          {submitting ? "Submitting…" : "Publish product"}
+          {submitting
+            ? editingProduct
+              ? "Saving…"
+              : "Submitting…"
+            : editingProduct
+              ? "Save changes"
+              : "Publish product"}
         </button>
       </form>
     </main>

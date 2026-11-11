@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
   ArrowLeft,
+  Pencil,
   ImageIcon,
   Package,
   Plus,
@@ -278,6 +279,7 @@ export default function ListingsPage() {
     </main>
   );
 }
+
 
 function ProductCard({
   product,
