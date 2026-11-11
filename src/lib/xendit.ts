@@ -179,3 +179,25 @@ export function verifyXenditCallbackToken(receivedToken: string | null) {
 export function getXenditServerKeyConfigured() {
   return Boolean(process.env.XENDIT_SECRET_KEY);
 }
+
+export function isXenditTestMode() {
+  return process.env.XENDIT_SECRET_KEY?.startsWith("xnd_development_") ?? false;
+}
+
+export function simulateXenditQrPayment(input: {
+  externalId: string;
+  amount: number;
+}) {
+  if (!isXenditTestMode()) {
+    throw new Error("Xendit payment simulation is only available with a test API key.");
+  }
+  const body = new URLSearchParams({ amount: String(input.amount) });
+  return xenditRequest<{ id?: string; status?: string }>(
+    `/qr_codes/${encodeURIComponent(input.externalId)}/payments/simulate`,
+    {
+      method: "POST",
+      body,
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    },
+  );
+}

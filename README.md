@@ -192,6 +192,8 @@ CLOUDINARY_API_SECRET=...
   `https://<your-domain>/api/payments/webhook`. Copy its callback verification
   token into `XENDIT_CALLBACK_TOKEN`.
 - Xendit dynamic QRIS transactions must be between Rp1.500 and Rp10.000.000.
+- The payment page offers a test-only simulation button when `XENDIT_SECRET_KEY`
+  uses an Xendit development key. The simulation API rejects production keys.
 - `SHIPPING_MODE=mock` is the default development mode.
 - Set `SHIPPING_MODE=biteship` to use Biteship.
 - Biteship API keys must remain server-side.
@@ -298,6 +300,8 @@ shipping, GP redemption, and total amount from server-side data.
   - Creates one dynamic QRIS code and returns its QR string for inline display.
 - `GET /api/payments`
 - `POST /api/payments/webhook` receives Xendit QR payment callbacks.
+- `POST /api/payments/simulate` simulates a payment only when the server uses an
+  Xendit development key and the authenticated user owns the pending order.
 
 QRIS must be enabled for the merchant account. Cash refunds use Xendit's refund
 API when the original payment channel supports API refunds; any rejected refund

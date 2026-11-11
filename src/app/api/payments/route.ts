@@ -6,6 +6,7 @@ import {
   createXenditQrCode,
   getXenditQrCode,
   getXenditPaymentSession,
+  isXenditTestMode,
   type XenditQrCode,
 } from "@/lib/xendit";
 import Cart from "@/models/Cart";
@@ -62,6 +63,7 @@ export async function POST(request: NextRequest) {
           qrCodeId: existing.xenditQrCodeId,
           qrString: existing.xenditQrString,
           grossAmount: existing.grossAmount,
+          testMode: isXenditTestMode(),
         },
       });
     }
@@ -185,6 +187,7 @@ export async function POST(request: NextRequest) {
         qrCodeId: payment.xenditQrCodeId,
         qrString: payment.xenditQrString,
         grossAmount: payment.grossAmount,
+        testMode: isXenditTestMode(),
       },
     });
   } catch (error) {
@@ -387,7 +390,13 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    return NextResponse.json({ success: true, data: payments });
+    return NextResponse.json({
+      success: true,
+      data: payments.map((payment) => ({
+        ...payment,
+        testMode: isXenditTestMode(),
+      })),
+    });
   } catch (error) {
     console.error("Get payments error:", error);
     return NextResponse.json(

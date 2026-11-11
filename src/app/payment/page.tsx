@@ -25,6 +25,7 @@ type Payment = {
   xenditQrCodeId?: string;
   xenditQrString?: string;
   redirectUrl?: string;
+  testMode?: boolean;
 };
 
 const statusCopy: Record<PaymentStatus, { title: string; detail: string }> = {
@@ -64,7 +65,28 @@ export default function PaymentPage() {
   const [error, setError] = useState("");
   const [statusError, setStatusError] = useState("");
   const [pollingTimedOut, setPollingTimedOut] = useState(false);
+  const [simulating, setSimulating] = useState(false);
+  const [simulationMessage, setSimulationMessage] = useState("");
   const displayError = orderId ? error : "Order ID is missing.";
+
+  async function simulatePayment() {
+    if (!orderId || simulating) return;
+    setSimulating(true);
+    setStatusError("");
+    try {
+      await apiRequest<{ status: string }>("/api/payments/simulate", {
+        method: "POST",
+        body: JSON.stringify({ orderId }),
+      });
+      setSimulationMessage("Simulation requested. Waiting for Xendit to confirm it…");
+    } catch (cause) {
+      setStatusError(
+        cause instanceof Error ? cause.message : "Could not simulate payment.",
+      );
+    } finally {
+      setSimulating(false);
+    }
+  }
 
   useEffect(() => {
     if (!orderId) return;
@@ -223,6 +245,27 @@ export default function PaymentPage() {
                 <p className="mt-2 text-xs text-danger">{statusError}</p>
               )}
             </div>
+          </div>
+        )}
+        {payment?.testMode && payment.status === "PENDING" && payment.qrCodeId && (
+          <div className="mt-4 rounded-2xl border border-warning/30 bg-warning/5 p-4">
+            <p className="text-xs leading-relaxed text-ink-muted">
+              Test mode only. Simulating marks this order as paid without an actual
+              QRIS transaction.
+            </p>
+            <button
+              type="button"
+              onClick={() => void simulatePayment()}
+              disabled={simulating}
+              className="mt-3 flex min-h-11 w-full items-center justify-center rounded-full bg-ink text-sm font-semibold text-white disabled:opacity-60"
+            >
+              {simulating ? "Simulating payment…" : "Simulate successful payment"}
+            </button>
+            {simulationMessage && (
+              <p role="status" className="mt-2 text-center text-xs text-ink-muted">
+                {simulationMessage}
+              </p>
+            )}
           </div>
         )}
       </section>
