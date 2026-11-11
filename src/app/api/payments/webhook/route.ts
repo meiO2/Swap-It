@@ -14,8 +14,10 @@ import { createNotificationsForMany } from "@/lib/notifications";
 type XenditSessionNotification = {
   event?: string;
   data?: {
+    id?: string;
     payment_session_id?: string;
     reference_id?: string;
+    session_type?: string;
     amount?: number;
     status?: string;
     payment_request_id?: string | null;
@@ -52,11 +54,13 @@ export async function POST(request: Request) {
     const notification =
       (await request.json()) as XenditSessionNotification;
     const data = notification.data;
+    const paymentSessionId = data?.payment_session_id ?? data?.id;
     const paymentStatus = mapStatus(notification.event ?? "", data?.status);
     if (
       !paymentStatus ||
+      data?.session_type !== "PAY" ||
       typeof data?.reference_id !== "string" ||
-      typeof data.payment_session_id !== "string" ||
+      typeof paymentSessionId !== "string" ||
       typeof data.amount !== "number" ||
       !Number.isSafeInteger(data.amount)
     ) {
@@ -83,7 +87,7 @@ export async function POST(request: Request) {
 
     await connectDB();
     const payment = await Payment.findOne({
-      xenditSessionId: data.payment_session_id,
+      xenditSessionId: paymentSessionId,
       xenditReferenceId: data.reference_id,
       orderId,
     });

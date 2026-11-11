@@ -73,6 +73,7 @@ export async function createXenditPaymentSession(input: {
       amount: input.amount,
       currency: "IDR",
       country: "ID",
+      allowed_payment_channels: ["QRIS"],
       customer: {
         reference_id: input.referenceId,
         type: "INDIVIDUAL",

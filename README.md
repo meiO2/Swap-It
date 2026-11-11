@@ -32,13 +32,13 @@ community messaging, and Revamp! upcycled merchandise in one Next.js app.
 
 ### Payments
 
-- Xendit Payment Sessions with Xendit-hosted checkout.
+- Xendit Payment Sessions with Xendit-hosted QRIS checkout.
 - Payment status polling and webhook verification.
 - Idempotent payment updates.
 - Failed or expired payments release products and refund redeemed Green
   Points.
 
-Payment methods depend on the channels enabled for the Xendit account.
+Checkout is restricted to QRIS. QRIS must be enabled for the Xendit account.
 
 ### Green Points
 
@@ -287,9 +287,10 @@ shipping, GP redemption, and total amount from server-side data.
 - `GET /api/payments`
 - `POST /api/payments/webhook` receives Xendit Payment Session events.
 
-The Xendit checkout only displays channels enabled for the merchant account.
-Cash refunds use Xendit's refund API when the original payment channel supports
-API refunds; any rejected refund is recorded as failed for manual follow-up.
+The Xendit checkout is restricted to QRIS, which must be enabled for the
+merchant account. Cash refunds use Xendit's refund API when the original
+payment channel supports API refunds; any rejected refund is recorded as failed
+for manual follow-up.
 
 ### Green Points
 

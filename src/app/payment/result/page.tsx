@@ -148,8 +148,8 @@ export default function PaymentResultPage() {
               {formatRupiah(payment?.grossAmount ?? 0)}
             </p>
             {status === "PENDING" && (
-              <p className="mt-2 text-xs text-ink-muted">
-                This page checks for updates automatically.
+              <p role="status" className="mt-3 rounded-xl bg-mint-50 p-3 text-xs text-ink-muted">
+                Payment status updates automatically for up to 5 minutes. You do not need to reload this page.
               </p>
             )}
           </>
