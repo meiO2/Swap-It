@@ -22,6 +22,8 @@ type Payment = {
   status: PaymentStatus;
   qrCodeId?: string;
   qrString?: string;
+  xenditQrCodeId?: string;
+  xenditQrString?: string;
   redirectUrl?: string;
 };
 
@@ -82,7 +84,11 @@ export default function PaymentPage() {
         if (!active) return;
         const current = payments[0];
         if (!current) throw new Error("Payment record was not found.");
-        setPayment(current);
+        setPayment({
+          ...current,
+          qrCodeId: current.qrCodeId ?? current.xenditQrCodeId,
+          qrString: current.qrString ?? current.xenditQrString,
+        });
         setStatusError("");
         if (current.status === "PENDING" && attempts < 60) {
           timer = setTimeout(() => void checkStatus(), 5000);
