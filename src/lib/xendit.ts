@@ -191,13 +191,11 @@ export function simulateXenditQrPayment(input: {
   if (!isXenditTestMode()) {
     throw new Error("Xendit payment simulation is only available with a test API key.");
   }
-  const body = new URLSearchParams({ amount: String(input.amount) });
   return xenditRequest<{ id?: string; status?: string }>(
     `/qr_codes/${encodeURIComponent(input.externalId)}/payments/simulate`,
     {
       method: "POST",
-      body,
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: JSON.stringify({ amount: input.amount }),
     },
   );
 }
