@@ -89,6 +89,8 @@ export default function ListingsPage() {
   const [products, setProducts] = useState<SellerProduct[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [unlistingId, setUnlistingId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -104,7 +106,7 @@ export default function ListingsPage() {
           setError(
             cause instanceof Error
               ? cause.message
-              : "Could not load your products.",
+              : "Could not load your products."
           );
         }
       })
@@ -118,6 +120,54 @@ export default function ListingsPage() {
       active = false;
     };
   }, []);
+
+  async function handleUnlist(product: SellerProduct) {
+    const confirmed = window.confirm(
+      `Are you sure you want to unlist "${product.name}"?\n\nIt will no longer appear in the marketplace. You can list it again later.`
+    );
+
+    if (!confirmed) return;
+
+    try {
+      setUnlistingId(product._id);
+      setActionError("");
+
+      const response = await fetch(
+        `/api/products/${product._id}`,
+        {
+          method: "DELETE",
+        }
+      );
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        throw new Error(
+          result.message || "Failed to unlist product."
+        );
+      }
+
+      setProducts((current) =>
+        current.map((item) =>
+          item._id === product._id
+            ? {
+                ...item,
+                status: "INACTIVE",
+                publishedAt: null,
+              }
+            : item
+        )
+      );
+    } catch (cause) {
+      setActionError(
+        cause instanceof Error
+          ? cause.message
+          : "Could not unlist this product."
+      );
+    } finally {
+      setUnlistingId(null);
+    }
+  }
 
   return (
     <main className="px-4 pb-6 pt-5">
@@ -159,6 +209,15 @@ export default function ListingsPage() {
         </p>
       )}
 
+      {actionError && (
+        <p
+          role="alert"
+          className="mb-3 rounded-xl bg-danger/10 p-3 text-xs text-danger"
+        >
+          {actionError}
+        </p>
+      )}
+
       {loading ? (
         <p
           role="status"
@@ -190,6 +249,8 @@ export default function ListingsPage() {
             <ProductCard
               key={product._id}
               product={product}
+              onUnlist={handleUnlist}
+              unlisting={unlistingId === product._id}
             />
           ))}
         </div>
@@ -220,89 +281,108 @@ export default function ListingsPage() {
 
 function ProductCard({
   product,
+  onUnlist,
+  unlisting,
 }: {
   product: SellerProduct;
+  onUnlist: (product: SellerProduct) => void;
+  unlisting: boolean;
 }) {
   const status = STATUS_CONFIG[product.status];
 
   return (
+    <article className="rounded-2xl bg-white p-4 shadow-card transition hover:shadow-md">
       <Link
         href={`/products/${product._id}`}
-        className="block rounded-2xl bg-white p-4 shadow-card transition hover:shadow-md"
+        className="block"
       >
-      <div className="flex gap-3">
-        <div className="size-24 shrink-0 overflow-hidden rounded-xl bg-mint-50">
-          {product.images?.[0] ? (
-            <img
-              src={product.images[0]}
-              alt={product.name}
-              className="h-full w-full object-cover"
-            />
-          ) : (
-            <div className="flex h-full items-center justify-center text-primary">
-              <ImageIcon size={28} />
-            </div>
-          )}
-        </div>
-
-        <div className="min-w-0 flex-1">
-          <div className="mb-2 flex flex-wrap items-center gap-2">
-            <span
-              className={`rounded-full px-2.5 py-1 text-[10px] font-semibold ${status.style}`}
-            >
-              {status.label}
-            </span>
+        <div className="flex gap-3">
+          <div className="size-24 shrink-0 overflow-hidden rounded-xl bg-mint-50">
+            {product.images?.[0] ? (
+              <img
+                src={product.images[0]}
+                alt={product.name}
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <div className="flex h-full items-center justify-center text-primary">
+                <ImageIcon size={28} />
+              </div>
+            )}
           </div>
 
-          <h2 className="text-sm font-semibold text-ink">
-            {product.name}
-          </h2>
+          <div className="min-w-0 flex-1">
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <span
+                className={`rounded-full px-2.5 py-1 text-[10px] font-semibold ${status.style}`}
+              >
+                {status.label}
+              </span>
+            </div>
 
-          <p className="mt-1 text-xs text-ink-muted">
-            {product.category} · Size {product.size}
+            <h2 className="text-sm font-semibold text-ink">
+              {product.name}
+            </h2>
+
+            <p className="mt-1 text-xs text-ink-muted">
+              {product.category} · Size {product.size}
+            </p>
+
+            <p className="mt-1 text-xs text-ink-muted">
+              {CONDITION_LABELS[product.condition] ??
+                product.condition}
+            </p>
+
+            <p className="mt-2 text-sm font-semibold text-primary">
+              {formatRupiah(product.price)}
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-3 rounded-xl bg-mint-50 p-3 text-xs">
+          <p className="font-medium text-ink">
+            {product.fulfillment}
           </p>
 
-          <p className="mt-1 text-xs text-ink-muted">
-            {CONDITION_LABELS[product.condition] ??
-              product.condition}
-          </p>
+          {product.fulfillment === "Pickup" &&
+            product.pickupAddress && (
+              <p className="mt-1 text-ink-muted">
+                Pickup from {product.pickupAddress.name}:{" "}
+                {product.pickupAddress.address},{" "}
+                {product.pickupAddress.city}{" "}
+                {product.pickupAddress.postalCode}
+              </p>
+            )}
 
-          <p className="mt-2 text-sm font-semibold text-primary">
-            {formatRupiah(product.price)}
+          {product.fulfillment === "Pickup" &&
+            product.pickupDate && (
+              <p className="mt-1 text-ink-muted">
+                Preferred pickup date:{" "}
+                {formatShortDate(product.pickupDate)}
+              </p>
+            )}
+
+          <p className="mt-2 text-[10px] text-ink-muted">
+            Published:{" "}
+            {product.publishedAt
+              ? formatShortDate(product.publishedAt)
+              : "Not published"}
           </p>
         </div>
-      </div>
+      </Link>
 
-      <div className="mt-3 rounded-xl bg-mint-50 p-3 text-xs">
-        <p className="font-medium text-ink">
-          {product.fulfillment}
-        </p>
-
-        {product.fulfillment === "Pickup" &&
-          product.pickupAddress && (
-            <p className="mt-1 text-ink-muted">
-              Pickup from {product.pickupAddress.name}:{" "}
-              {product.pickupAddress.address},{" "}
-              {product.pickupAddress.city}{" "}
-              {product.pickupAddress.postalCode}
-            </p>
-          )}
-
-        {product.fulfillment === "Pickup" &&
-          product.pickupDate && (
-            <p className="mt-1 text-ink-muted">
-              Preferred pickup date:{" "}
-              {formatShortDate(product.pickupDate)}
-            </p>
-          )}
-
-        <p className="mt-2 text-[10px] text-ink-muted">
-          Published:{" "}
-          {product.publishedAt
-            ? formatShortDate(product.publishedAt)
-            : "Not published"}
-        </p>
-      </div>
-    </Link>
+      {product.status === "AVAILABLE" && (
+        <div className="mt-3 border-t border-mint-100 pt-3">
+          <button
+            type="button"
+            onClick={() => onUnlist(product)}
+            disabled={unlisting}
+            className="w-full rounded-xl border border-danger/30 px-4 py-2.5 text-xs font-semibold text-danger transition hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {unlisting ? "Unlisting..." : "Unlist product"}
+          </button>
+        </div>
+      )}
+    </article>
   );
 }
