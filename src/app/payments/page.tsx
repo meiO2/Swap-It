@@ -49,7 +49,7 @@ export default function PaymentsPage() {
         </Link>
         <div>
           <h1 className="text-xl font-semibold text-ink">Payment history</h1>
-          <p className="text-xs text-ink-muted">Your Midtrans transactions</p>
+          <p className="text-xs text-ink-muted">Your Xendit transactions</p>
         </div>
       </header>
 

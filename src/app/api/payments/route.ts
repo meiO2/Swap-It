@@ -3,11 +3,9 @@ import mongoose from "mongoose";
 import { requireAuth } from "@/lib/authorization";
 import { connectDB } from "@/lib/mongodb";
 import {
-  chargeCoreTransaction,
-  createSnapTransaction,
-  getMidtransTransactionStatus,
-  type CorePaymentMethod,
-} from "@/lib/midtrans";
+  createXenditPaymentSession,
+  getXenditPaymentSession,
+} from "@/lib/xendit";
 import Cart from "@/models/Cart";
 import Order from "@/models/Order";
 import Payment from "@/models/Payment";
@@ -52,28 +50,14 @@ export async function POST(request: NextRequest) {
     }
 
     const existing = await Payment.findOne({ orderId: order._id }).lean();
-    if (existing?.status === "PENDING" && existing.snapToken && !body?.paymentMethod) {
+    if (existing?.status === "PENDING" && existing.redirectUrl) {
       return NextResponse.json({
         success: true,
         data: {
           paymentId: existing._id,
           orderId: existing.orderId,
           status: existing.status,
-          snapToken: existing.snapToken,
           redirectUrl: existing.redirectUrl,
-          grossAmount: existing.grossAmount,
-        },
-      });
-    }
-    if (existing?.status === "PENDING" && existing.paymentData && body?.paymentMethod) {
-      return NextResponse.json({
-        success: true,
-        data: {
-          paymentId: existing._id,
-          orderId: existing.orderId,
-          status: existing.status,
-          paymentType: existing.paymentType,
-          paymentData: existing.paymentData,
           grossAmount: existing.grossAmount,
         },
       });
@@ -93,141 +77,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const midtransOrderId = `swapit-${order._id.toString()}`;
-    const itemDetails = order.items.map((item) => ({
-      id: item.productId.toString(),
-      price: item.price,
-      quantity: 1,
-      name: item.name,
-    }));
-    if (order.shippingFee > 0) {
-      itemDetails.push({
-        id: "shipping",
-        price: order.shippingFee,
-        quantity: 1,
-        name: "Shipping fee",
-      });
-    }
-    if (order.serviceFee > 0) {
-      itemDetails.push({
-        id: "service-fee",
-        price: order.serviceFee,
-        quantity: 1,
-        name: "Service fee",
-      });
-    }
-    if (order.gpUsed > 0) {
-      itemDetails.push({
-        id: "green-points",
-        price: -order.gpUsed,
-        quantity: 1,
-        name: "Green Points discount",
-      });
-    }
-
-    const customPaymentMethod = body?.paymentMethod as CorePaymentMethod | undefined;
-    if (customPaymentMethod) {
-      const supportedMethods: CorePaymentMethod[] = [
-        "bca_va", "bni_va", "bri_va", "mandiri_va", "permata_va",
-        "qris", "gopay", "shopeepay", "indomaret", "alfamart", "credit_card",
-      ];
-      if (!supportedMethods.includes(customPaymentMethod)) {
-        return NextResponse.json(
-          { success: false, message: "Unsupported payment method." },
-          { status: 400 },
-        );
-      }
-      let charge;
-      try {
-        charge = await chargeCoreTransaction({
-          orderId: midtransOrderId,
-          grossAmount: order.totalAmount,
-          paymentMethod: customPaymentMethod,
-          tokenId: typeof body.tokenId === "string" ? body.tokenId : undefined,
-          itemDetails,
-          customer: { firstName: user.name, email: user.email },
-        });
-      } catch (error) {
-        const session = await mongoose.startSession();
-        try {
-          await session.withTransaction(async () => {
-            await Order.updateOne(
-              { _id: order._id, status: "PENDING_PAYMENT" },
-              { $set: { status: "CANCELLED" } },
-              { session },
-            );
-            await Product.updateMany(
-              { _id: { $in: order.items.map((item) => item.productId) }, status: "RESERVED" },
-              { $set: { status: "AVAILABLE" } },
-              { session },
-            );
-            await Cart.findOneAndUpdate(
-              { userId: auth.user.id },
-              {
-                $setOnInsert: { userId: auth.user.id },
-                $addToSet: {
-                  items: {
-                    $each: order.items.map((item) => ({ productId: item.productId, addedAt: new Date() })),
-                  },
-                },
-              },
-              { upsert: true, session },
-            );
-            if (order.gpUsed > 0) {
-              await awardGreenPoints({
-                userId: auth.user.id,
-                amount: order.gpUsed,
-                type: "REFUND",
-                description: "Green Points returned after payment creation failed",
-                referenceKey: `order:${order._id.toString()}:gp-refund`,
-                session,
-              });
-            }
-          });
-        } finally {
-          await session.endSession();
-        }
-        throw error;
-      }
-      const payment = await Payment.findOneAndUpdate(
-        { orderId: order._id },
-        {
-          $set: {
-            userId: order.buyerId,
-            midtransOrderId,
-            grossAmount: order.totalAmount,
-            status: "PENDING",
-            transactionId: charge.transaction_id,
-            paymentType: charge.payment_type ?? customPaymentMethod,
-            paymentData: charge,
-          },
-        },
-        { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true },
-      );
-      return NextResponse.json({
-        success: true,
-        data: {
-          paymentId: payment._id,
-          orderId: payment.orderId,
-          status: payment.status,
-          paymentType: payment.paymentType,
-          paymentData: payment.paymentData,
-          grossAmount: payment.grossAmount,
-        },
-      });
-    }
-
-    let snap;
+    const referenceId = `swapit-${order._id.toString()}`;
+    let paymentSession;
     try {
-      snap = await createSnapTransaction({
-        orderId: midtransOrderId,
-        grossAmount: order.totalAmount,
-        itemDetails,
-        customer: {
-          firstName: user.name,
-          email: user.email,
-        },
-        finishUrl: `${new URL(request.url).origin}/payment/result?orderId=${order._id.toString()}`,
+      const resultUrl = `${new URL(request.url).origin}/payment/result?orderId=${order._id.toString()}`;
+      paymentSession = await createXenditPaymentSession({
+        referenceId,
+        amount: order.totalAmount,
+        email: user.email,
+        name: user.name,
+        successReturnUrl: resultUrl,
+        cancelReturnUrl: resultUrl,
       });
     } catch (error) {
       const session = await mongoose.startSession();
@@ -280,11 +140,13 @@ export async function POST(request: NextRequest) {
       {
         $set: {
           userId: order.buyerId,
-          midtransOrderId,
+          // Keep the existing unique MongoDB index populated during migration.
+          midtransOrderId: referenceId,
+          xenditSessionId: paymentSession.payment_session_id,
+          xenditReferenceId: paymentSession.reference_id,
           grossAmount: order.totalAmount,
           status: "PENDING",
-          snapToken: snap.token,
-          redirectUrl: snap.redirect_url,
+          redirectUrl: paymentSession.payment_link_url,
         },
       },
       { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true },
@@ -296,7 +158,6 @@ export async function POST(request: NextRequest) {
         paymentId: payment._id,
         orderId: payment.orderId,
         status: payment.status,
-        snapToken: payment.snapToken,
         redirectUrl: payment.redirectUrl,
         grossAmount: payment.grossAmount,
       },
@@ -335,20 +196,24 @@ export async function GET(request: NextRequest) {
       .sort({ createdAt: -1 })
       .lean();
 
-    const pending = payments.find((payment) => payment.status === "PENDING");
-    if (pending) {
+    const pending = payments.find(
+      (payment) => payment.status === "PENDING" && payment.xenditSessionId,
+    );
+    if (pending?.xenditSessionId) {
       try {
-        const status = await getMidtransTransactionStatus(pending.midtransOrderId);
-        const isPaid =
-          status.transaction_status === "settlement" ||
-          (status.transaction_status === "capture" &&
-            status.fraud_status !== "challenge");
-        const finalStatus = isPaid
-          ? "PAID"
-          : status.transaction_status === "expire"
-            ? "EXPIRED"
-            : status.transaction_status === "cancel" || status.transaction_status === "deny"
-              ? "CANCELED"
+        const session = await getXenditPaymentSession(pending.xenditSessionId);
+        if (
+          session.reference_id !== pending.xenditReferenceId ||
+          session.amount !== pending.grossAmount
+        ) {
+          throw new Error("Xendit payment session does not match the stored order.");
+        }
+
+        const finalStatus =
+          session.status === "COMPLETED"
+            ? "PAID"
+            : session.status === "EXPIRED"
+              ? "EXPIRED"
               : "PENDING";
 
         if (finalStatus !== "PENDING") {
@@ -357,8 +222,11 @@ export async function GET(request: NextRequest) {
             {
               $set: {
                 status: finalStatus,
-                transactionId: status.transaction_id,
-                paymentType: status.payment_type,
+                transactionId: session.payment_id ?? undefined,
+                xenditPaymentRequestId:
+                  session.latest_payment_request_id ??
+                  session.payment_request_id ??
+                  undefined,
                 paidAt: finalStatus === "PAID" ? new Date() : undefined,
               },
             },
@@ -370,7 +238,7 @@ export async function GET(request: NextRequest) {
               status: "AWAITING_SELLER_HANDOVER",
               "items.$[].handover.status": "AWAITING_SELLER_SCHEDULE",
               "items.$[].handoverDeadline": handoverDeadline,
-            } : { status: finalStatus === "EXPIRED" ? "EXPIRED" : "CANCELLED" } },
+            } : { status: "EXPIRED" } },
           );
           if (finalStatus === "PAID") {
             const paidOrder = await Order.findById(pending.orderId).lean();
@@ -393,7 +261,7 @@ export async function GET(request: NextRequest) {
           payments = await Payment.find(query).sort({ createdAt: -1 }).lean();
         }
       } catch (error) {
-        console.error("Could not synchronize Midtrans payment status.", error);
+        console.error("Could not synchronize Xendit payment status.", error);
       }
     }
 

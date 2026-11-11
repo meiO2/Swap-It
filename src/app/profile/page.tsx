@@ -15,7 +15,7 @@ const links = [
   { label: "Revamp offers", detail: "Decide on eligible unsold listings", href: "/revamp/offers", Icon: PackageCheck },
   { label: "My listings", detail: "Manage your listings and QC", href: "/listings", Icon: ListChecks },
   { label: "My orders", detail: "Track purchases and swaps", href: "/orders", Icon: PackageCheck },
-  { label: "Payment history", detail: "View Midtrans transactions", href: "/payments", Icon: ReceiptText },
+  { label: "Payment history", detail: "View Xendit transactions", href: "/payments", Icon: ReceiptText },
   { label: "Green Point wallet", detail: "Balance, expiry, and activity", href: "/wallet", Icon: WalletCards },
   { label: "Settings", detail: "Profile and saved addresses", href: "/profile/settings", Icon: Settings2 },
 ];

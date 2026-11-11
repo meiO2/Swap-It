@@ -24,7 +24,7 @@ const statusCopy: Record<
 > = {
   PENDING: {
     title: "Payment is being confirmed",
-    detail: "We are waiting for confirmation from Midtrans.",
+    detail: "We are waiting for confirmation from Xendit.",
     tone: "text-warning",
   },
   PAID: {

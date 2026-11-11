@@ -4,7 +4,7 @@ import Payment from "@/models/Payment";
 import Refund, { type RefundReason } from "@/models/Refund";
 import RefundTransaction from "@/models/RefundTransaction";
 import { awardGreenPoints } from "@/lib/green-points";
-import { getMidtransServerKeyConfigured, refundMidtransTransaction } from "@/lib/midtrans";
+import { getXenditServerKeyConfigured, refundXenditPayment } from "@/lib/xendit";
 
 export function serializeRefund(refund: object) { const value = refund as { _id: unknown; orderId: unknown; userId: unknown }; return { ...refund, id: String(value._id), orderId: String(value.orderId), userId: String(value.userId), _id: undefined }; }
 export async function getRefundableOrder(orderId: string, userId: string) {
@@ -22,10 +22,10 @@ export async function approveRefund(refundId: string, reviewerId: string, note =
   const cashProduct = isQc ? 0 : Math.max(0, order.subtotal - order.gpUsed);
   const gpProduct = isQc ? order.subtotal : order.gpUsed;
   const components = [
-    ...(cashProduct ? [{ component: "PRODUCT", refundType: "CASH", amount: cashProduct, provider: "MIDTRANS" }] : []),
+    ...(cashProduct ? [{ component: "PRODUCT", refundType: "CASH", amount: cashProduct, provider: "XENDIT" }] : []),
     ...(gpProduct ? [{ component: "PRODUCT", refundType: "GP", amount: gpProduct, provider: "INTERNAL_GP" }] : []),
-    ...(order.shippingFee ? [{ component: "SHIPPING", refundType: "CASH", amount: order.shippingFee, provider: "MIDTRANS" }] : []),
-    ...(order.serviceFee ? [{ component: "SERVICE_FEE", refundType: "CASH", amount: order.serviceFee, provider: "MIDTRANS" }] : []),
+    ...(order.shippingFee ? [{ component: "SHIPPING", refundType: "CASH", amount: order.shippingFee, provider: "XENDIT" }] : []),
+    ...(order.serviceFee ? [{ component: "SERVICE_FEE", refundType: "CASH", amount: order.serviceFee, provider: "XENDIT" }] : []),
   ] as const;
   for (const entry of components) {
     const key = `refund:${refund._id}:${entry.component}:${entry.refundType}`;
@@ -34,9 +34,13 @@ export async function approveRefund(refundId: string, reviewerId: string, note =
       await RefundTransaction.updateOne({ idempotencyKey: key }, { $setOnInsert: { refundId: refund._id, orderId: order._id, ...entry, status: "COMPLETED", idempotencyKey: key, processedAt: new Date(), providerReference: key } }, { upsert: true });
     } else {
       if (!payment) { await RefundTransaction.updateOne({ idempotencyKey: key }, { $setOnInsert: { refundId: refund._id, orderId: order._id, ...entry, status: "FAILED", idempotencyKey: key, failureReason: "No settled cash payment found." } }, { upsert: true }); continue; }
-      if (!getMidtransServerKeyConfigured()) { await RefundTransaction.updateOne({ idempotencyKey: key }, { $setOnInsert: { refundId: refund._id, orderId: order._id, ...entry, status: "PENDING", idempotencyKey: key, failureReason: "Midtrans is not configured." } }, { upsert: true }); continue; }
-      try { const result = await refundMidtransTransaction({ orderId: payment.midtransOrderId, refundKey: key, amount: entry.amount, reason: refund.reason.replaceAll("_", " ") }); await RefundTransaction.updateOne({ idempotencyKey: key }, { $setOnInsert: { refundId: refund._id, orderId: order._id, ...entry, idempotencyKey: key }, $set: { status: "COMPLETED", processedAt: new Date(), providerReference: result.refund_key ?? key, failureReason: undefined } }, { upsert: true }); }
-      catch (error) { await RefundTransaction.updateOne({ idempotencyKey: key }, { $setOnInsert: { refundId: refund._id, orderId: order._id, ...entry, idempotencyKey: key }, $set: { status: "FAILED", failureReason: error instanceof Error ? error.message : "Midtrans refund failed." } }, { upsert: true }); }
+      if (!payment.xenditPaymentRequestId) { await RefundTransaction.updateOne({ idempotencyKey: key }, { $setOnInsert: { refundId: refund._id, orderId: order._id, ...entry, status: "FAILED", idempotencyKey: key, failureReason: "Xendit payment request reference is missing." } }, { upsert: true }); continue; }
+      if (!getXenditServerKeyConfigured()) { await RefundTransaction.updateOne({ idempotencyKey: key }, { $setOnInsert: { refundId: refund._id, orderId: order._id, ...entry, status: "PENDING", idempotencyKey: key, failureReason: "Xendit is not configured." } }, { upsert: true }); continue; }
+      try {
+        const result = await refundXenditPayment({ paymentRequestId: payment.xenditPaymentRequestId, referenceId: key, amount: entry.amount });
+        const status = result.status === "SUCCEEDED" ? "COMPLETED" : result.status === "PENDING" ? "PENDING" : "FAILED";
+        await RefundTransaction.updateOne({ idempotencyKey: key }, { $setOnInsert: { refundId: refund._id, orderId: order._id, ...entry, idempotencyKey: key }, $set: { status, processedAt: status === "COMPLETED" ? new Date() : undefined, providerReference: result.id ?? key, failureReason: status === "FAILED" ? "Xendit refund was not successful." : undefined } }, { upsert: true });
+      } catch (error) { await RefundTransaction.updateOne({ idempotencyKey: key }, { $setOnInsert: { refundId: refund._id, orderId: order._id, ...entry, idempotencyKey: key }, $set: { status: "FAILED", failureReason: error instanceof Error ? error.message : "Xendit refund failed." } }, { upsert: true }); }
     }
   }
   const transactions = await RefundTransaction.find({ refundId: refund._id }).lean();
@@ -44,7 +48,7 @@ export async function approveRefund(refundId: string, reviewerId: string, note =
   const hasFailed = transactions.some((item) => item.status === "FAILED");
   const hasCompleted = transactions.some((item) => item.status === "COMPLETED");
   const status = hasPending || (hasFailed && hasCompleted) ? "PARTIALLY_COMPLETED" : hasFailed ? "FAILED" : "COMPLETED";
-  return Refund.findByIdAndUpdate(refund._id, { $set: { status, totalApprovedAmount: components.reduce((total, item) => total + item.amount, 0) }, $push: { auditLog: { status, note: hasPending ? "GP processed; cash refund awaits Midtrans processing." : hasFailed ? "One or more refund components failed." : "All refund components completed.", actorId: reviewerId, at: new Date() } } }, { new: true });
+  return Refund.findByIdAndUpdate(refund._id, { $set: { status, totalApprovedAmount: components.reduce((total, item) => total + item.amount, 0) }, $push: { auditLog: { status, note: hasPending ? "GP processed; cash refund awaits Xendit processing." : hasFailed ? "One or more refund components failed." : "All refund components completed.", actorId: reviewerId, at: new Date() } } }, { new: true });
 }
 export async function createQcCompensation(input: { orderId: string; userId: string; productId: string }) {
   const order = await getRefundableOrder(input.orderId, input.userId);

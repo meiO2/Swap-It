@@ -1,233 +1,135 @@
-
 import { NextResponse } from "next/server";
 import mongoose from "mongoose";
-
 import { connectDB } from "@/lib/mongodb";
 import {
-  verifyMidtransSignature,
-  getMidtransServerKeyConfigured,
-} from "@/lib/midtrans";
-
+  getXenditCallbackTokenConfigured,
+  verifyXenditCallbackToken,
+} from "@/lib/xendit";
 import Order from "@/models/Order";
 import Payment, { type PaymentStatus } from "@/models/Payment";
 import Product from "@/models/Product";
-
-import {
-  awardGreenPoints,
-  GREEN_POINT_REWARDS,
-} from "@/lib/green-points";
-
+import { awardGreenPoints, GREEN_POINT_REWARDS } from "@/lib/green-points";
 import { createNotificationsForMany } from "@/lib/notifications";
 
-type MidtransNotification = {
-  order_id?: string;
-  transaction_id?: string;
-  transaction_status?: string;
-  fraud_status?: string;
-  status_code?: string;
-  gross_amount?: string;
-  signature_key?: string;
-  payment_type?: string;
+type XenditSessionNotification = {
+  event?: string;
+  data?: {
+    payment_session_id?: string;
+    reference_id?: string;
+    amount?: number;
+    status?: string;
+    payment_request_id?: string | null;
+    latest_payment_request_id?: string | null;
+    payment_id?: string | null;
+  };
 };
 
-function mapStatus(
-  notification: MidtransNotification
-): PaymentStatus {
-  if (
-    notification.transaction_status === "settlement" ||
-    (notification.transaction_status === "capture" &&
-      notification.fraud_status !== "challenge")
-  ) {
+function mapStatus(event: string, status?: string): PaymentStatus | null {
+  if (event === "payment_session.completed" && status === "COMPLETED") {
     return "PAID";
   }
-
-  if (notification.transaction_status === "expire") {
+  if (event === "payment_session.expired" && status === "EXPIRED") {
     return "EXPIRED";
   }
-
-  if (
-    notification.transaction_status === "cancel" ||
-    notification.transaction_status === "deny"
-  ) {
-    return "CANCELED";
-  }
-
-  if (notification.transaction_status === "refund") {
-    return "FAILED";
-  }
-
-  return "PENDING";
+  return null;
 }
 
 export async function POST(request: Request) {
   try {
-    if (!getMidtransServerKeyConfigured()) {
+    if (!getXenditCallbackTokenConfigured()) {
       return NextResponse.json(
-        {
-          success: false,
-          message: "Payment webhook is not configured.",
-        },
-        { status: 503 }
+        { success: false, message: "Xendit webhook is not configured." },
+        { status: 503 },
+      );
+    }
+    if (!verifyXenditCallbackToken(request.headers.get("x-callback-token"))) {
+      return NextResponse.json(
+        { success: false, message: "Invalid Xendit callback token." },
+        { status: 401 },
       );
     }
 
     const notification =
-      (await request.json()) as MidtransNotification;
-
-    const required = [
-      notification.order_id,
-      notification.status_code,
-      notification.gross_amount,
-      notification.signature_key,
-    ];
-
+      (await request.json()) as XenditSessionNotification;
+    const data = notification.data;
+    const paymentStatus = mapStatus(notification.event ?? "", data?.status);
     if (
-      required.some(
-        (value) => typeof value !== "string" || !value
-      )
+      !paymentStatus ||
+      typeof data?.reference_id !== "string" ||
+      typeof data.payment_session_id !== "string" ||
+      typeof data.amount !== "number" ||
+      !Number.isSafeInteger(data.amount)
     ) {
       return NextResponse.json(
-        {
-          success: false,
-          message: "Invalid Midtrans notification.",
-        },
-        { status: 400 }
+        { success: false, message: "Invalid Xendit payment session notification." },
+        { status: 400 },
       );
     }
 
-    if (
-      !verifyMidtransSignature({
-        orderId: notification.order_id!,
-        statusCode: notification.status_code!,
-        grossAmount: notification.gross_amount!,
-        signatureKey: notification.signature_key!,
-      })
-    ) {
+    const prefix = "swapit-";
+    if (!data.reference_id.startsWith(prefix)) {
       return NextResponse.json(
-        {
-          success: false,
-          message: "Invalid Midtrans signature.",
-        },
-        { status: 401 }
+        { success: false, message: "Unknown payment reference." },
+        { status: 400 },
       );
     }
-
-    const paymentStatus = mapStatus(notification);
-    const midtransOrderId = notification.order_id!;
-
-    if (!midtransOrderId.startsWith("swapit-")) {
-      return NextResponse.json(
-        {
-          success: false,
-          message: "Unknown payment order ID.",
-        },
-        { status: 400 }
-      );
-    }
-
-    const orderId = midtransOrderId.slice(
-      "swapit-".length
-    );
-
+    const orderId = data.reference_id.slice(prefix.length);
     if (!mongoose.Types.ObjectId.isValid(orderId)) {
       return NextResponse.json(
-        {
-          success: false,
-          message: "Invalid payment order ID.",
-        },
-        { status: 400 }
+        { success: false, message: "Invalid payment order reference." },
+        { status: 400 },
       );
     }
 
     await connectDB();
-
     const payment = await Payment.findOne({
-      midtransOrderId,
+      xenditSessionId: data.payment_session_id,
+      xenditReferenceId: data.reference_id,
+      orderId,
     });
-
     if (!payment) {
       return NextResponse.json(
-        {
-          success: false,
-          message: "Payment record not found.",
-        },
-        { status: 404 }
+        { success: false, message: "Payment record not found." },
+        { status: 404 },
       );
     }
-
-    const receivedAmount = Number(
-      notification.gross_amount
-    );
-
-    if (
-      !Number.isSafeInteger(receivedAmount) ||
-      receivedAmount !== payment.grossAmount
-    ) {
+    if (data.amount !== payment.grossAmount) {
       return NextResponse.json(
-        {
-          success: false,
-          message: "Payment amount mismatch.",
-        },
-        { status: 400 }
+        { success: false, message: "Payment amount mismatch." },
+        { status: 400 },
       );
     }
-
-    if (payment.status === paymentStatus) {
+    if (payment.status === paymentStatus || payment.status === "PAID") {
       return NextResponse.json({
         success: true,
         message: "Notification already processed.",
       });
     }
 
-    if (
-      payment.status === "PAID" &&
-      paymentStatus !== "PAID"
-    ) {
-      return NextResponse.json({
-        success: true,
-        message: "Payment is already paid.",
-      });
-    }
-
     const session = await mongoose.startSession();
-
     try {
       await session.withTransaction(async () => {
         const updated = await Payment.findOneAndUpdate(
-          {
-            _id: payment._id,
-            status: payment.status,
-          },
+          { _id: payment._id, status: payment.status },
           {
             $set: {
               status: paymentStatus,
-              transactionId: notification.transaction_id,
-              paymentType: notification.payment_type,
-              paidAt:
-                paymentStatus === "PAID"
-                  ? new Date()
-                  : undefined,
+              transactionId: data.payment_id ?? undefined,
+              xenditPaymentRequestId:
+                data.latest_payment_request_id ??
+                data.payment_request_id ??
+                undefined,
+              paidAt: paymentStatus === "PAID" ? new Date() : undefined,
             },
           },
-          {
-            new: true,
-            session,
-          }
+          { new: true, session },
         );
-
         if (!updated) return;
-
-        // ==========================================
-        // PAYMENT SUCCESSFUL
-        // ==========================================
 
         if (paymentStatus === "PAID") {
           const handoverDeadline = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
           await Order.updateOne(
-            {
-              _id: orderId,
-              status: "PENDING_PAYMENT",
-            },
+            { _id: orderId, status: "PENDING_PAYMENT" },
             {
               $set: {
                 status: "AWAITING_SELLER_HANDOVER",
@@ -235,30 +137,18 @@ export async function POST(request: Request) {
                 "items.$[].handoverDeadline": handoverDeadline,
               },
             },
-            { session }
+            { session },
           );
-
-          const paidOrder = await Order.findById(
-            orderId
-          )
-            .session(session)
-            .lean();
-
+          const paidOrder = await Order.findById(orderId).session(session).lean();
           if (paidOrder) {
             await Product.updateMany(
               { _id: { $in: paidOrder.items.map((item) => item.productId) }, status: "RESERVED" },
               { $set: { status: "SOLD_PENDING_HANDOVER" } },
               { session },
             );
-            // Notify all sellers involved in this order.
             const sellerIds = [
-              ...new Set(
-                paidOrder.items.map((item) =>
-                  item.sellerId.toString()
-                )
-              ),
+              ...new Set(paidOrder.items.map((item) => item.sellerId.toString())),
             ];
-
             await createNotificationsForMany({
               recipientIds: sellerIds,
               senderId: paidOrder.buyerId.toString(),
@@ -269,107 +159,50 @@ export async function POST(request: Request) {
               link: "/orders",
               session,
             });
-
-            // Award Green Points to the buyer.
             const reward = Math.floor(
-              paidOrder.subtotal *
-                GREEN_POINT_REWARDS.purchaseRate
+              paidOrder.subtotal * GREEN_POINT_REWARDS.purchaseRate,
             );
-
             if (reward > 0) {
               await awardGreenPoints({
                 userId: paidOrder.buyerId.toString(),
                 amount: reward,
-                description:
-                  "Completed marketplace purchase reward",
+                description: "Completed marketplace purchase reward",
                 referenceKey: `purchase:${paidOrder._id.toString()}`,
                 session,
               });
             }
           }
-        }
-
-        // ==========================================
-        // PAYMENT CANCELLED / EXPIRED / FAILED
-        // ==========================================
-
-        else if (
-          paymentStatus === "CANCELED" ||
-          paymentStatus === "EXPIRED" ||
-          paymentStatus === "FAILED"
-        ) {
+        } else {
           await Order.updateOne(
-            {
-              _id: orderId,
-              status: "PENDING_PAYMENT",
-            },
-            {
-              $set: {
-                status:
-                  paymentStatus === "EXPIRED"
-                    ? "EXPIRED"
-                    : "CANCELLED",
-              },
-            },
-            { session }
+            { _id: orderId, status: "PENDING_PAYMENT" },
+            { $set: { status: "EXPIRED" } },
+            { session },
           );
-
-          const cancelledOrder =
-            await Order.findById(orderId).session(session);
-
+          const cancelledOrder = await Order.findById(orderId).session(session);
           if (cancelledOrder) {
-            const paymentMessage =
-              paymentStatus === "EXPIRED"
-                ? "Your payment has expired. Your order has been cancelled."
-                : paymentStatus === "CANCELED"
-                  ? "Your payment was cancelled. Your order has been cancelled."
-                  : "Your payment failed. Your order has been cancelled.";
-
             await createNotificationsForMany({
               recipientIds: [cancelledOrder.buyerId.toString()],
               type: "ORDER_UPDATE",
-              title:
-                paymentStatus === "EXPIRED"
-                  ? "Payment expired"
-                  : paymentStatus === "CANCELED"
-                    ? "Payment cancelled"
-                    : "Payment failed",
-              message: paymentMessage,
+              title: "Payment expired",
+              message: "Your payment has expired. Your order has been cancelled.",
               link: "/orders",
               session,
             });
           }
-
-          // Release reserved products.
           await Product.updateMany(
             {
-              _id: {
-                $in:
-                  cancelledOrder?.items.map(
-                    (item) => item.productId
-                  ) ?? [],
-              },
+              _id: { $in: cancelledOrder?.items.map((item) => item.productId) ?? [] },
               status: "RESERVED",
             },
-            {
-              $set: {
-                status: "AVAILABLE",
-              },
-            },
-            { session }
+            { $set: { status: "AVAILABLE" } },
+            { session },
           );
-
-          // Return used Green Points to the buyer.
-          if (
-            cancelledOrder &&
-            (cancelledOrder.gpUsed ?? 0) > 0
-          ) {
+          if (cancelledOrder && (cancelledOrder.gpUsed ?? 0) > 0) {
             await awardGreenPoints({
               userId: cancelledOrder.buyerId.toString(),
               amount: cancelledOrder.gpUsed ?? 0,
               type: "REFUND",
-              description:
-                "Green Points returned after payment cancellation",
+              description: "Green Points returned after payment expiration",
               referenceKey: `order:${cancelledOrder._id.toString()}:gp-refund`,
               session,
             });
@@ -385,14 +218,10 @@ export async function POST(request: Request) {
       message: "Notification processed.",
     });
   } catch (error) {
-    console.error("Midtrans webhook error:", error);
-
+    console.error("Xendit webhook error:", error);
     return NextResponse.json(
-      {
-        success: false,
-        message: "Failed to process payment notification.",
-      },
-      { status: 500 }
+      { success: false, message: "Failed to process payment notification." },
+      { status: 500 },
     );
   }
 }
