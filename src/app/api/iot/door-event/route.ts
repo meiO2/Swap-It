@@ -17,6 +17,8 @@
     HubDeviceState,
     } from "@/types/hub-device";
 
+    class HubEventConflict extends Error {}
+
     const transitions: Record<
     HubDeviceState,
     Partial<Record<HubDeviceEvent, HubDeviceState>>
@@ -36,6 +38,7 @@
 
     export async function POST(request: NextRequest) {
     try {
+        await connectDB();
         const device = await authenticateHubDevice(request);
 
         if (!device) {
@@ -75,8 +78,6 @@
             { status: 400 }
         );
         }
-
-        await connectDB();
 
         const session = await HubDeviceSession.findOne({
             _id: new mongoose.Types.ObjectId(input.sessionId),
@@ -120,6 +121,73 @@
             },
             { status: 400 }
         );
+        }
+
+        if (input.event === "DOOR_LOCKED" && session.activity === "DONATION" && session.donationSessionId) {
+            const transaction = await mongoose.startSession();
+            let donorId = "";
+            try {
+                await transaction.withTransaction(async () => {
+                    const updated = await HubDeviceSession.findOneAndUpdate(
+                        {
+                            _id: session._id,
+                            deviceId: device.deviceId,
+                            hubId: device.hubId,
+                            state: session.state,
+                        },
+                        {
+                            $set: { state: "COMPLETED" },
+                            $push: {
+                                events: {
+                                    event: input.event,
+                                    occurredAt,
+                                    receivedAt: now,
+                                },
+                            },
+                        },
+                        { new: true, runValidators: true, session: transaction },
+                    ).lean();
+                    if (!updated) throw new HubEventConflict("Session state changed. Please refresh device state.");
+
+                    const donation = await Donation.findOneAndUpdate(
+                        {
+                            sessionId: updated.donationSessionId,
+                            hubId: updated.hubId,
+                            status: { $in: ["QR_SCANNED", "DEPOSITING"] },
+                        },
+                        { $set: { status: "UNDER_VERIFICATION", confirmedAt: now } },
+                        { new: true, session: transaction },
+                    ).lean();
+                    if (!donation) throw new HubEventConflict("Donation is not awaiting physical deposit confirmation.");
+                    donorId = donation.userId.toString();
+                });
+            } catch (error) {
+                if (error instanceof HubEventConflict) {
+                    return NextResponse.json({ success: false, message: error.message }, { status: 409 });
+                }
+                throw error;
+            } finally {
+                await transaction.endSession();
+            }
+
+            try {
+                await createNotificationsForMany({
+                    recipientIds: [donorId],
+                    type: "DONATION_DELIVERED",
+                    title: "Donation deposited — awaiting verification",
+                    message: "The Swap Hub confirmed your deposit. An administrator will inspect and classify your items before Green Points are awarded.",
+                    link: "/donate",
+                });
+            } catch (notificationError) {
+                console.error("Donation deposit recorded but notification failed:", notificationError);
+            }
+
+            const response: HubDoorEventResponse = {
+                success: true,
+                message: `Event ${input.event} recorded.`,
+                data: { deviceState: "COMPLETED", nextAction: "NONE" },
+            };
+            return NextResponse.json(response);
         }
 
         // Atomic compare-and-update: only one request can advance this state.
@@ -173,13 +241,6 @@
                 await createNotificationsForMany({ recipientIds: [order.buyerId.toString(), item.sellerId.toString()], type: "ITEM_ARRIVED", title: "Item received by SwapIt", message: `${item.name} has been received and will proceed to quality inspection.`, link: `/orders/${order._id.toString()}` });
             }
         }
-        if (input.event === "DOOR_LOCKED" && updatedSession.activity === "DONATION" && updatedSession.donationSessionId) {
-            await Donation.updateOne(
-                { sessionId: updatedSession.donationSessionId, status: { $in: ["QR_SCANNED", "DEPOSITING"] } },
-                { $set: { status: "UNDER_VERIFICATION" } },
-            );
-        }
-
         const response: HubDoorEventResponse = {
         success: true,
         message: `Event ${input.event} recorded.`,

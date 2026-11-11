@@ -1,6 +1,7 @@
 
     import { NextRequest, NextResponse } from "next/server";
     import { createHash } from "crypto";
+    import mongoose from "mongoose";
     import { connectDB } from "@/lib/mongodb";
     import { authenticateHubDevice } from "@/lib/hub-device-auth";
     import HubAccessToken from "@/models/HubAccessToken";
@@ -27,6 +28,8 @@
 
     return NextResponse.json(response, { status });
     }
+
+    class HubScanConflict extends Error {}
 
     export async function POST(request: NextRequest) {
     try {
@@ -79,12 +82,85 @@
             sessionId: accessToken.donationSessionId,
             userId: accessToken.userId,
             hubId: device.hubId,
-            status: { $in: ["SESSION_CREATED", "QR_SCANNED"] },
+            status: "SESSION_CREATED",
         }).lean();
 
         if (!donation) {
             return errorResponse("Donation session is no longer valid.", 409);
         }
+        }
+
+        if (accessToken.activity === "DONATION" && accessToken.donationSessionId) {
+            const transaction = await mongoose.startSession();
+            let deviceSession: Awaited<ReturnType<typeof HubDeviceSession.create>>[number] | undefined;
+            try {
+                await transaction.withTransaction(async () => {
+                    const consumedToken = await HubAccessToken.findOneAndUpdate(
+                        {
+                            _id: accessToken._id,
+                            tokenHash,
+                            hubId: device.hubId,
+                            status: "ACTIVE",
+                            expiresAt: { $gt: new Date() },
+                        },
+                        {
+                            $set: {
+                                status: "CONSUMED",
+                                consumedAt: new Date(),
+                                consumedByDeviceId: device.deviceId,
+                            },
+                        },
+                        { new: true, session: transaction },
+                    ).lean();
+
+                    if (!consumedToken) throw new HubScanConflict("QR token has already been used.");
+
+                    const donation = await Donation.findOneAndUpdate(
+                        {
+                            sessionId: consumedToken.donationSessionId,
+                            userId: consumedToken.userId,
+                            hubId: device.hubId,
+                            status: "SESSION_CREATED",
+                        },
+                        { $set: { status: "QR_SCANNED" } },
+                        { new: true, session: transaction },
+                    ).lean();
+                    if (!donation) throw new HubScanConflict("Donation session is no longer valid.");
+
+                    const createdSessions = await HubDeviceSession.create([{
+                        deviceId: device.deviceId,
+                        hubId: device.hubId,
+                        accessTokenId: consumedToken._id,
+                        activity: consumedToken.activity,
+                        donationSessionId: consumedToken.donationSessionId,
+                        state: "AUTHORIZED",
+                        itemDetected: false,
+                        events: [],
+                    }], { session: transaction });
+                    deviceSession = createdSessions[0];
+                });
+            } catch (error) {
+                if (error instanceof HubScanConflict) return errorResponse(error.message, 409);
+                throw error;
+            } finally {
+                await transaction.endSession();
+            }
+
+            const response: HubScanSuccessResponse = {
+                success: true,
+                action: "UNLOCK",
+                message: "QR verified. Door unlock authorized.",
+                data: {
+                    sessionId: deviceSession!._id.toString(),
+                    activity: "DONATION",
+                    hubId: device.hubId,
+                    deviceId: device.deviceId,
+                    donationSessionId: accessToken.donationSessionId,
+                    orderId: null,
+                    productId: null,
+                },
+            };
+            return NextResponse.json(response);
         }
 
         // Verify seller handover eligibility.
@@ -135,13 +211,6 @@
 
         if (!consumedToken) {
         return errorResponse("QR token has already been used.", 409);
-        }
-
-        if (consumedToken.activity === "DONATION" && consumedToken.donationSessionId) {
-            await Donation.updateOne(
-                { sessionId: consumedToken.donationSessionId, status: "SESSION_CREATED" },
-                { $set: { status: "QR_SCANNED" } },
-            );
         }
 
         const deviceSession = await HubDeviceSession.create({

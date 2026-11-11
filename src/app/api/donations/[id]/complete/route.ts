@@ -3,8 +3,6 @@ import mongoose from "mongoose";
 import { requireAuth } from "@/lib/authorization";
 import { connectDB } from "@/lib/mongodb";
 import Donation from "@/models/Donation";
-import { awardGreenPoints, GREEN_POINT_REWARDS } from "@/lib/green-points";
-import { createNotification } from "@/lib/notifications";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -23,41 +21,38 @@ export async function POST(_request: Request, { params }: RouteContext) {
       return NextResponse.json({ success: false, message: "A valid donation item count is required." }, { status: 400 });
     }
 
-    const completed = await Donation.findOne({
-      _id: id,
-      userId: auth.user.id,
-      status: "COMPLETED",
-    });
-    if (completed) {
-      return NextResponse.json({ success: true, data: completed });
-    }
-
     const donation = await Donation.findOneAndUpdate(
-      { _id: id, userId: auth.user.id, status: { $in: ["SESSION_CREATED", "QR_SCANNED", "UNDER_VERIFICATION", "PENDING"] } },
       {
-        $set: {
-          acceptedItems: itemCount,
-          rejectedItems: 0,
-          totalItems: itemCount,
-          gpAwarded: itemCount * GREEN_POINT_REWARDS.donationTemporaryPerItem,
-          status: "COMPLETED",
-          confirmedAt: new Date(),
-        },
+        _id: id,
+        userId: auth.user.id,
+        status: { $in: ["QR_SCANNED", "UNDER_VERIFICATION"] },
       },
+      { $set: { donorReportedItems: itemCount } },
       { new: true, runValidators: true },
     );
-    if (!donation) {
-      return NextResponse.json({ success: false, message: "Donation was already completed or not found." }, { status: 409 });
+    if (donation) {
+      return NextResponse.json({
+        success: true,
+        message: "Item count recorded. The Hub must confirm the deposit before verification.",
+        data: donation,
+      });
     }
 
-    await awardGreenPoints({
+    const existing = await Donation.findOne({
+      _id: id,
       userId: auth.user.id,
-      amount: donation.gpAwarded,
-      description: `Temporary donation reward for ${itemCount} item${itemCount === 1 ? "" : "s"}`,
-      referenceKey: `donation:${donation._id.toString()}`,
     });
-    await createNotification({ recipientId: auth.user.id, type: "DONATION_DELIVERED", title: "Donation completed", message: `${donation.gpAwarded.toLocaleString("id-ID")} GP was added for your donation.`, link: "/wallet" });
-    return NextResponse.json({ success: true, data: donation });
+    if (!existing) {
+      return NextResponse.json({ success: false, message: "Donation not found." }, { status: 404 });
+    }
+    if (existing.status === "COMPLETED") {
+      return NextResponse.json({ success: true, data: existing });
+    }
+
+    return NextResponse.json({
+      success: false,
+      message: `Item count cannot be recorded while donation status is ${existing.status}.`,
+    }, { status: 409 });
   } catch (error) {
     console.error("Complete donation error:", error);
     return NextResponse.json({ success: false, message: "Failed to complete donation." }, { status: 500 });

@@ -2,16 +2,43 @@
 
 import Image from "next/image";
 import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import { ArrowRight, Box, Gift, Leaf, MapPin, QrCode, Shirt, Star, X } from "lucide-react";
 import { OPEN_DONATION_BOX_IMAGE } from "@/lib/assets";
 import { StepRow, StickyActions, hubPrimaryButton, useSwapHubs } from "@/components/hub/hub-ui";
 import { useHubSession } from "@/store/hubSession";
+import { apiRequest } from "@/lib/api";
+import { formatGP } from "@/lib/format";
+
+type DonationSummary = {
+  _id: string;
+  hubId: string;
+  status: string;
+  totalItems: number;
+  donorReportedItems: number;
+  gpAwarded: number;
+  createdAt: string;
+};
 
 export default function DonatePage() {
   const router = useRouter();
   const startSession = useHubSession((state) => state.startSession);
+  const [donations, setDonations] = useState<DonationSummary[]>([]);
+  const [historyError, setHistoryError] = useState("");
+  const [historyLoading, setHistoryLoading] = useState(true);
   const { hubs, loading } = useSwapHubs();
   const nearestHub = hubs[0];
+
+  useEffect(() => {
+    let active = true;
+    apiRequest<DonationSummary[]>("/api/donations")
+      .then((data) => { if (active) setDonations(data); })
+      .catch((reason: unknown) => {
+        if (active) setHistoryError(reason instanceof Error ? reason.message : "Could not load donation history.");
+      })
+      .finally(() => { if (active) setHistoryLoading(false); });
+    return () => { active = false; };
+  }, []);
 
   if (loading) {
     return <main className="p-6"><p className="text-sm text-hub-muted">Loading Swap Hubs…</p></main>;
@@ -21,7 +48,7 @@ export default function DonatePage() {
   }
 
   function beginDonation() {
-    startSession();
+    startSession(nearestHub.id);
     router.push("/donate/hub/qr");
   }
 
@@ -57,8 +84,34 @@ export default function DonatePage() {
             <StepRow number={1} icon={<QrCode size={20} />} title="Show your QR code" detail="Display your unique QR code at the Hub scanner." />
             <StepRow number={2} icon={<Box size={20} />} title="The Hub scans it and the lid opens" detail="The machine verifies your code and opens the lid." />
             <StepRow number={3} icon={<Shirt size={20} />} title="Put your clothes in and enter the quantity" detail="Insert your items one by one and tell us how many pieces." />
-            <StepRow number={4} icon={<Star size={20} />} title="Confirm and receive Green Points" detail="Review your details and get your points instantly." last />
+            <StepRow number={4} icon={<Star size={20} />} title="Admin verifies your items" detail="Green Points are awarded after quality classification." last />
           </ol>
+        </section>
+
+        <section className="mt-6" aria-labelledby="donation-history-title">
+          <h2 id="donation-history-title" className="text-lg font-bold">Your donation progress</h2>
+          <p className="mt-1 text-xs text-hub-muted">Final Green Points are based on the administrator&apos;s item classifications.</p>
+          {historyError && <p role="alert" className="mt-3 rounded-xl bg-red-50 p-3 text-xs text-danger">{historyError}</p>}
+          {historyLoading && <p role="status" className="mt-3 rounded-2xl bg-white p-4 text-xs text-hub-muted shadow-card">Loading donation progress…</p>}
+          {!historyLoading && !historyError && donations.length === 0 && <p className="mt-3 rounded-2xl bg-white p-4 text-xs text-hub-muted shadow-card">No donation sessions yet.</p>}
+          <div className="mt-3 space-y-2">
+            {donations.slice(0, 5).map((donation) => (
+              <article key={donation._id} className="rounded-2xl bg-white p-4 shadow-card">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-hub-ink">
+                      {donation.status === "COMPLETED" || donation.status === "REWARD_GRANTED" ? "Completed" :
+                        donation.status === "UNDER_VERIFICATION" || donation.status === "PENDING" ? "Awaiting quality verification" :
+                          donation.status === "CANCELLED" ? "Cancelled" :
+                            donation.status === "DISCREPANCY_REVIEW" ? "Needs Hub review" : "In progress"}
+                    </p>
+                    <p className="mt-1 text-[10px] text-hub-muted">{donation.donorReportedItems || donation.totalItems} item(s) · Hub {donation.hubId} · {new Date(donation.createdAt).toLocaleDateString("id-ID")}</p>
+                  </div>
+                  {(donation.status === "COMPLETED" || donation.status === "REWARD_GRANTED") && <span className="whitespace-nowrap text-sm font-bold text-hub-primary">{formatGP(donation.gpAwarded)} GP</span>}
+                </div>
+              </article>
+            ))}
+          </div>
         </section>
 
         <a href="/map" className="mt-4 flex min-h-[76px] items-center gap-3 rounded-2xl bg-hub-mint p-3 transition hover:bg-hub-mint-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-hub-primary">

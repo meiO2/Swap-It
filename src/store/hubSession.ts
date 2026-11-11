@@ -2,7 +2,6 @@
 
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
-import { createDonationCode, QR_TTL_SECONDS } from "@/lib/hub";
 
 export type HubSessionStatus = "idle" | "qr_shown" | "scanned" | "confirmed";
 
@@ -10,13 +9,14 @@ type HubSession = {
   status: HubSessionStatus;
   code: string;
   expiresAt: number;
+  sessionKey: string;
   hubId: string;
   donationId: string;
   itemCount: number;
-  startSession: () => void;
-  refreshCode: (ttlSeconds?: number) => void;
-  setCodeExpiry: (ttlSeconds: number) => void;
+  startSession: (hubId?: string) => void;
+  setQrCredential: (code: string, expiresAt: number) => void;
   markScanned: () => void;
+  markHubScanned: () => void;
   setHubId: (hubId: string) => void;
   setDonationId: (donationId: string) => void;
   setItemCount: (count: number) => void;
@@ -28,37 +28,27 @@ const initialSession = {
   status: "idle" as const,
   code: "",
   expiresAt: 0,
+  sessionKey: "",
   hubId: "hub-bsd",
   donationId: "",
   itemCount: 1,
 };
 
-function createActiveCode(ttlSeconds = QR_TTL_SECONDS) {
-  return { code: createDonationCode(), expiresAt: Date.now() + ttlSeconds * 1000 };
-}
-
-function validateTtl(ttlSeconds: number) {
-  if (!Number.isFinite(ttlSeconds) || ttlSeconds < 1 || ttlSeconds > 3600) {
-    throw new RangeError("QR code duration must be between 1 and 3600 seconds.");
-  }
-}
-
 export const useHubSession = create<HubSession>()(
   persist(
     (set, get) => ({
       ...initialSession,
-      startSession: () => set({ ...initialSession, status: "qr_shown", ...createActiveCode() }),
-      refreshCode: (ttlSeconds = QR_TTL_SECONDS) => {
-        validateTtl(ttlSeconds);
-        if (get().status === "idle") {
-          set({ ...initialSession, status: "qr_shown", ...createActiveCode(ttlSeconds) });
-          return;
+      startSession: (hubId) => set({
+        ...initialSession,
+        hubId: hubId ?? get().hubId,
+        sessionKey: crypto.randomUUID(),
+        status: "qr_shown",
+      }),
+      setQrCredential: (code, expiresAt) => {
+        if (!code.trim() || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+          throw new RangeError("A valid, unexpired Hub QR credential is required.");
         }
-        set({ status: "qr_shown", ...createActiveCode(ttlSeconds) });
-      },
-      setCodeExpiry: (ttlSeconds) => {
-        validateTtl(ttlSeconds);
-        set({ expiresAt: Date.now() + ttlSeconds * 1000 });
+        set({ code, expiresAt });
       },
       markScanned: () => {
         const session = get();
@@ -67,6 +57,7 @@ export const useHubSession = create<HubSession>()(
         }
         set({ status: "scanned" });
       },
+      markHubScanned: () => set({ status: "scanned" }),
       setHubId: (hubId) => {
         if (!hubId.trim()) throw new RangeError("Choose a valid Swap Hub.");
         set({ hubId });

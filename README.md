@@ -56,7 +56,9 @@ Green Points are stored in a signed ledger rather than only in frontend state.
 
 - Registration and email verification reward: 2,000 GP.
 - Existing-user registration backfill for administrators.
-- Temporary donation reward: 1,500 GP per accepted item.
+- Donation quality rewards after admin verification: 5,000 GP per resale
+  item, 3,000 GP per upcycling item, and 2,000 GP per social-donation item.
+  Rejected items earn 0 GP.
 - Purchase reward: 2% of the eligible subtotal.
 - GP redemption at checkout using a slider.
 - Maximum redemption is limited by the available balance and product subtotal.
@@ -72,11 +74,20 @@ The ledger supports `EARN`, `REDEEM`, `REFUND`, `EXPIRE`, `ADJUSTMENT`, and
 
 - Swap Hub catalog with map coordinates, distance, address, and opening hours.
 - Donation flow:
-  QR code, Hub scan, item insertion, confirmation, and completion.
+  secure Hub QR scan, physical door-event confirmation, admin item
+  classification, and final GP award.
 - Donation records are stored in MongoDB.
-- Donation completion awards GP idempotently.
-- Admin donation review supports resale, upcycling, and social-donation
-  quality categories.
+- Donation GP is awarded once through the Green Points ledger after
+  verification; donor-reported item counts do not determine rewards.
+- Admin review includes pending verification, completed history, and
+  incomplete sessions; classification history is retained.
+- The backend requires MongoDB transactions for atomic Hub confirmation and
+  finalization, so production MongoDB must support transactions (replica set
+  or sharded cluster).
+- The ESP32 sketch remains a serial prototype: it still targets a legacy
+  verification path and does not yet send authenticated door events. A device
+  must be provisioned with its Hub credentials and send `/api/iot/scan` and
+  `/api/iot/door-event` requests to use the physical workflow.
 
 ### Community and sustainability
 
@@ -325,10 +336,15 @@ The backfill endpoint is admin-only and idempotent.
 - `GET /api/repair-shops`
 - `GET /api/chat-summaries`
 - `POST /api/donations`
+- `GET /api/donations`
 - `GET /api/donations/:id`
-- `PATCH /api/donations/:id`
-- `POST /api/donations/:id/complete`
-- `POST /api/donations/:id/cancel`
+- `PATCH /api/donations/:id` (ADMIN/INSPECTOR final classification)
+- `POST /api/donations/:id/complete` (records donor-reported item count only;
+  it does not mark the donation complete or award GP)
+- `PATCH /api/donations/:id/cancel`
+- `POST /api/hubs/access-token`
+- `POST /api/iot/scan` (Hub device authentication required)
+- `POST /api/iot/door-event` (Hub device authentication required)
 - `GET /api/news`
 - `GET /api/revamp`
 - `POST /api/shipping/rates`

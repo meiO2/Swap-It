@@ -88,7 +88,7 @@
             _id: donationId,
             userId: auth.user.id,
             hubId,
-            status: { $in: ["SESSION_CREATED", "QR_SCANNED"] },
+            status: "SESSION_CREATED",
         });
 
         if (!donation) {

@@ -3,13 +3,12 @@
 import Image from "next/image";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Check, Leaf, Minus, Plus } from "lucide-react";
+import { Check, Minus, Plus } from "lucide-react";
 import { motion } from "framer-motion";
 import { HubStepGuard, StickyActions, hubPrimaryButton } from "@/components/hub/hub-ui";
 import { DONATION_HUB_BOX_IMAGE } from "@/lib/assets";
-import { GP_PER_ITEM, MAX_DONATION_ITEMS } from "@/lib/hub";
+import { MAX_DONATION_ITEMS } from "@/lib/hub";
 import { useHubSession } from "@/store/hubSession";
-import { formatGP } from "@/lib/format";
 
 function InsertContent() {
   const router = useRouter();
@@ -68,10 +67,7 @@ function InsertContent() {
           )}
         </section>
 
-        <section className="mt-4 flex items-center gap-3 rounded-2xl bg-hub-mint p-4">
-          <Leaf size={23} className="shrink-0 text-hub-primary" fill="currentColor" />
-          <div className="min-w-0 flex-1"><p className="text-[10px] font-medium text-hub-muted">You&apos;ll receive</p><p className="text-xl font-bold text-hub-primary">{formatGP(Math.max(0, itemCount) * GP_PER_ITEM)}</p><p className="text-[10px] text-hub-muted">({Math.max(0, itemCount)} × {GP_PER_ITEM} GP)</p></div>
-        </section>
+        <p className="mt-4 rounded-2xl bg-hub-mint p-4 text-xs leading-relaxed text-hub-muted">This is your reported item count. The Hub confirms the deposit, then an administrator classifies each item before any Green Points are awarded.</p>
 
         <StickyActions>
           <button type="button" disabled={invalid} onClick={() => router.push("/donate/hub/confirm")} className={hubPrimaryButton}>Continue</button>
