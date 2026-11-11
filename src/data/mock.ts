@@ -10,6 +10,7 @@ export type Product = {
   imageAlt: string;
   seller: string;
   distance: string;
+  sellerId?: string;
 };
 
 export const products: Product[] = [

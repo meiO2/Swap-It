@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { formatRupiah } from "@/lib/format";
+import { apiRequest } from "@/lib/api";
 import {
   HandoverCard,
   type HandoverEntry,
@@ -43,6 +44,7 @@ export default function ProductDetail({ id }: { id: string }) {
   const [loading, setLoading] = useState(true);
   const [added, setAdded] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [startingChat, setStartingChat] = useState(false);
   const [error, setError] = useState("");
   const [isOwner, setIsOwner] = useState(false);
   const [sellerHandover, setSellerHandover] =
@@ -229,6 +231,37 @@ export default function ProductDetail({ id }: { id: string }) {
     void handleAddToCart(true);
   }
 
+  async function handleStartChat() {
+    if (!product || startingChat || isOwner) return;
+
+    const sellerId =
+      typeof product.sellerId === "string"
+        ? product.sellerId
+        : product.sellerId._id;
+
+    try {
+      setStartingChat(true);
+      setError("");
+      const conversation = await apiRequest<{ _id: string }>(
+        "/api/conversations",
+        {
+          method: "POST",
+          body: JSON.stringify({ recipientId: sellerId }),
+        },
+      );
+      router.push(
+        `/chat/${conversation._id}?product=${encodeURIComponent(product._id)}`,
+      );
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "Could not start a conversation with this seller.",
+      );
+      setStartingChat(false);
+    }
+  }
+
   if (loading) {
     return (
       <main className="px-4 py-8">
@@ -399,13 +432,19 @@ export default function ProductDetail({ id }: { id: string }) {
         )}
 
         <div className="grid grid-cols-2 gap-2">
-          <Link
-            href="/chat"
+          <button
+            type="button"
+            onClick={() => void handleStartChat()}
+            disabled={startingChat || isOwner}
             className="flex h-11 items-center justify-center gap-2 rounded-full border border-border bg-white text-xs font-semibold text-ink hover:bg-mint-50"
           >
             <MessageCircle size={16} />
-            Chat seller
-          </Link>
+            {startingChat
+              ? "Opening chat..."
+              : isOwner
+                ? "Your listing"
+                : "Chat seller"}
+          </button>
 
           <button
             type="button"

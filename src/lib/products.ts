@@ -49,7 +49,7 @@ export type ApiProduct = {
   size: string;
   condition: ProductCondition;
   images: string[];
-  sellerId: string;
+  sellerId: string | { _id: string };
 };
 
 const CONDITION_LABELS: Record<ProductCondition, string> = {
@@ -72,6 +72,10 @@ export function mapApiProduct(product: ApiProduct): MarketplaceProduct {
     imageAlt: product.name,
     seller: "SwapIt member",
     distance: "",
+    sellerId:
+      typeof product.sellerId === "string"
+        ? product.sellerId
+        : product.sellerId._id,
   };
 }
 
