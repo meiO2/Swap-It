@@ -8,7 +8,6 @@ import {
   ArrowLeft,
   MapPin,
   MessageCircle,
-  Pencil,
   ShieldCheck,
   ShoppingBag,
 } from "lucide-react";
@@ -376,15 +375,6 @@ export default function ProductDetail({ id }: { id: string }) {
 
         {isOwner && (
           <section className="space-y-3">
-            {product.status === "AVAILABLE" && (
-              <Link
-                href={`/sell?edit=${encodeURIComponent(product._id)}`}
-                className="flex h-11 items-center justify-center gap-2 rounded-full bg-primary text-xs font-semibold text-white"
-              >
-                <Pencil size={15} />
-                Edit listing
-              </Link>
-            )}
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-primary">
                 Seller Center
