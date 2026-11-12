@@ -370,6 +370,13 @@ the rate before saving the order.
 The amount sent to Xendit is calculated from the stored order, including
 shipping, service fees, and redeemed Green Points.
 
+The buyer service fee is 2.5% of the product subtotal, rounded to the nearest
+rupiah. At checkout, each seller's product subtotal must be at least Rp5.500.
+New orders record an initial estimate of the seller's net after a Rp5.500
+transaction fee per seller per order. This snapshot does not process a fee or
+adjust for later refunds; seller balances, settlement, and bank withdrawals
+are not implemented.
+
 Before deploying this provider change, complete or cancel any outstanding
 Midtrans payments; the payment webhook now handles Xendit QR payment events.
 

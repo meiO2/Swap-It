@@ -31,6 +31,7 @@ export type ProductInput = {
   name: string;
   description: string;
   category: string;
+  brand?: string;
   price: number;
   size: string;
   condition: ProductCondition;
@@ -132,6 +133,13 @@ export function parseProductInput(
       return { data: {}, error: "Product category is required." };
     }
     data.category = input.category.trim();
+  }
+
+  if (input.brand !== undefined) {
+    if (typeof input.brand !== "string" || input.brand.trim().length > 80) {
+      return { data: {}, error: "Brand must be 80 characters or fewer." };
+    }
+    data.brand = input.brand.trim();
   }
 
   if (!partial || input.size !== undefined) {

@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { QRIS_MAX_AMOUNT, QRIS_MIN_AMOUNT } from "@/lib/payment-limits";
 
 type XenditConfig = {
   secretKey: string;
@@ -105,7 +106,7 @@ export async function createXenditQrCode(input: {
   amount: number;
   callbackUrl: string;
 }) {
-  if (!Number.isSafeInteger(input.amount) || input.amount < 1500 || input.amount > 10_000_000) {
+  if (!Number.isSafeInteger(input.amount) || input.amount < QRIS_MIN_AMOUNT || input.amount > QRIS_MAX_AMOUNT) {
     throw new Error("QRIS payments must be between Rp1.500 and Rp10.000.000.");
   }
 

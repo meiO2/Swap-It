@@ -14,7 +14,12 @@ import Product from "@/models/Product";
 import { getBiteshipCourierCode } from "@/lib/biteship";
 import { getShippingRates, ShippingRequestError } from "@/lib/shipping";
 import { getGreenPointBalance, redeemGreenPoints } from "@/lib/green-points";
-import { calculateBuyerServiceFee } from "@/lib/fees";
+import {
+  calculateBuyerServiceFee,
+  calculateSellerFeeSnapshots,
+  SELLER_MINIMUM_MESSAGE,
+} from "@/lib/fees";
+import { QRIS_AMOUNT_MESSAGE, QRIS_MAX_AMOUNT, QRIS_MIN_AMOUNT } from "@/lib/payment-limits";
 
 const PAYMENT_EXPIRY_MINUTES = 30;
 
@@ -46,6 +51,7 @@ export async function GET() {
 
     const serializedOrders = orders.map((order) => ({
       ...order,
+      sellerFeeSnapshots: undefined,
       id: order._id.toString(),
       items: order.items.map((item) => ({
         ...item,
@@ -236,6 +242,16 @@ export async function POST(request: NextRequest) {
           0,
         );
 
+        const sellerFeeSnapshots = calculateSellerFeeSnapshots(
+          items.map((item) => ({
+            sellerId: item.sellerId.toString(),
+            price: item.price,
+          })),
+        );
+        if (sellerFeeSnapshots.some((snapshot) => snapshot.netAmount < 0)) {
+          throw new Error(SELLER_MINIMUM_MESSAGE);
+        }
+
         // Service fee is paid in currency, never with Green Points.
         const serviceFee = calculateBuyerServiceFee(subtotal);
         const availableGp = await getGreenPointBalance(
@@ -251,6 +267,9 @@ export async function POST(request: NextRequest) {
         }
         const totalAmount =
           subtotal + shippingFee + serviceFee - gpUsed;
+        if (totalAmount < QRIS_MIN_AMOUNT || totalAmount > QRIS_MAX_AMOUNT) {
+          throw new Error(QRIS_AMOUNT_MESSAGE);
+        }
 
         const expiresAt = new Date(
           Date.now() + PAYMENT_EXPIRY_MINUTES * 60 * 1000,
@@ -262,6 +281,10 @@ export async function POST(request: NextRequest) {
           subtotal,
           shippingFee,
           serviceFee,
+          sellerFeeSnapshots: sellerFeeSnapshots.map((snapshot) => ({
+            ...snapshot,
+            sellerId: new mongoose.Types.ObjectId(snapshot.sellerId),
+          })),
           gpUsed,
           totalAmount,
           deliveryMethod: body.deliveryMethod,
@@ -357,6 +380,8 @@ export async function POST(request: NextRequest) {
       "One or more products are no longer available.",
       "You cannot buy your own product.",
       "Products changed availability during checkout.",
+      SELLER_MINIMUM_MESSAGE,
+      QRIS_AMOUNT_MESSAGE,
     ].includes(message)
       ? 409
       : error instanceof ShippingRequestError

@@ -34,9 +34,15 @@ QC endpoints allow ADMIN and INSPECTOR.
 - `GET /api/orders` — current user's orders.
 - `POST /api/orders` — creates an order using courier delivery only. The
   request includes `deliveryMethod: "courier"`, a shipping address, courier
-  code, and optional Green Points. Buyer service fee is 2.5% of the subtotal,
-  bounded by the configured minimum and maximum.
+  code, and optional Green Points. The buyer service fee is 2.5% of the
+  subtotal, rounded to the nearest rupiah. Each seller's products must total
+  at least Rp5.500. An initial seller fee snapshot records a Rp5.500 fee once
+  per seller per order and the resulting estimated net amount.
 - `GET /api/orders/:id` — returns an order belonging to the current user.
+  Sellers receive their own `sellerFeeSnapshot` for new orders; it is an
+  estimate, not a balance or payout, and does not reflect later refunds.
+  Legacy orders do not have a snapshot. Seller balances, settlement, and
+  bank withdrawals are not implemented.
 - `POST /api/uploads` — authenticated multipart upload with 1-8 `images`
   files (JPEG, PNG, or WebP; up to 5 MB each). The server uploads files to
   Cloudinary and returns their HTTPS URLs.

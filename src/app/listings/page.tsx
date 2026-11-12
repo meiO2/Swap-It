@@ -13,14 +13,7 @@ import {
 
 import { apiRequest } from "@/lib/api";
 import { formatRupiah, formatShortDate } from "@/lib/format";
-
-type ProductStatus =
-  | "AVAILABLE"
-  | "RESERVED"
-  | "SOLD"
-  | "INACTIVE"
-  | "REVAMP_ELIGIBLE"
-  | "REVAMPED";
+import type { ProductStatus } from "@/models/Product";
 
 type SellerProduct = {
   _id: string;
@@ -73,6 +66,58 @@ const STATUS_CONFIG: Record<
   REVAMPED: {
     label: "Revamped",
     style: "bg-success/15 text-success",
+  },
+  SOLD_PENDING_HANDOVER: {
+    label: "Sold · handover pending",
+    style: "bg-warning/15 text-warning",
+  },
+  RECEIVED: {
+    label: "Received at Swap Hub",
+    style: "bg-info/15 text-info",
+  },
+  QC_IN_PROGRESS: {
+    label: "Quality check in progress",
+    style: "bg-warning/15 text-warning",
+  },
+  QC_PASSED: {
+    label: "Quality check passed",
+    style: "bg-success/15 text-success",
+  },
+  QC_DEFECT_FOUND: {
+    label: "Issue found in quality check",
+    style: "bg-danger/15 text-danger",
+  },
+  AWAITING_BUYER_CONFIRMATION: {
+    label: "Awaiting buyer confirmation",
+    style: "bg-warning/15 text-warning",
+  },
+  READY_TO_SHIP: {
+    label: "Ready to ship",
+    style: "bg-info/15 text-info",
+  },
+  SHIPPED: {
+    label: "Shipped",
+    style: "bg-info/15 text-info",
+  },
+  COMPLETED: {
+    label: "Completed",
+    style: "bg-success/15 text-success",
+  },
+  CANCELLED: {
+    label: "Cancelled",
+    style: "bg-ink-muted/15 text-ink-muted",
+  },
+  RETURN_PENDING: {
+    label: "Return pending",
+    style: "bg-warning/15 text-warning",
+  },
+  RETURNED: {
+    label: "Returned",
+    style: "bg-ink-muted/15 text-ink-muted",
+  },
+  TRANSFERRED_TO_REVAMP: {
+    label: "Transferred to Revamp",
+    style: "bg-info/15 text-info",
   },
 };
 
@@ -290,7 +335,12 @@ function ProductCard({
   onUnlist: (product: SellerProduct) => void;
   unlisting: boolean;
 }) {
-  const status = STATUS_CONFIG[product.status];
+  const status = STATUS_CONFIG[product.status] ?? {
+    label: typeof product.status === "string" && product.status
+      ? product.status.replaceAll("_", " ")
+      : "Unknown",
+    style: "bg-ink-muted/15 text-ink-muted",
+  };
 
   return (
     <article className="rounded-2xl bg-white p-4 shadow-card transition hover:shadow-md">
@@ -374,12 +424,19 @@ function ProductCard({
       </Link>
 
       {product.status === "AVAILABLE" && (
-        <div className="mt-3 border-t border-mint-100 pt-3">
+        <div className="mt-3 grid grid-cols-2 gap-2 border-t border-mint-100 pt-3">
+          <Link
+            href={`/sell?edit=${encodeURIComponent(product._id)}`}
+            className="flex items-center justify-center gap-2 rounded-xl border border-primary/30 px-3 py-2.5 text-xs font-semibold text-primary transition hover:bg-mint-50"
+          >
+            <Pencil size={14} />
+            Edit listing
+          </Link>
           <button
             type="button"
             onClick={() => onUnlist(product)}
             disabled={unlisting}
-            className="w-full rounded-xl border border-danger/30 px-4 py-2.5 text-xs font-semibold text-danger transition hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-xl border border-danger/30 px-3 py-2.5 text-xs font-semibold text-danger transition hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {unlisting ? "Unlisting..." : "Unlist product"}
           </button>
