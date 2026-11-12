@@ -10,24 +10,73 @@ import { useEffect } from "react";
 import { apiRequest } from "@/lib/api";
 import { useHubSession } from "@/store/hubSession";
 
-const defaultLocation: [number, number] = [0, 0];
-
 export default function MapPage() {
   const router = useRouter();
   const setHubId = useHubSession((state) => state.setHubId);
-  const [center, setCenter] = useState<[number, number]>(defaultLocation);
+  const [center, setCenter] = useState<[number, number] | null>(null);
   const [selectedHub, setSelectedHub] = useState("");
   const [swapHubs, setSwapHubs] = useState<SwapHub[]>([]);
+  const [loadingHubs, setLoadingHubs] = useState(true);
+  const [hubError, setHubError] = useState("");
+  const [locationError, setLocationError] = useState("");
+  const [locating, setLocating] = useState(false);
+  const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
   const hub = swapHubs.find((item) => item.id === selectedHub) ?? swapHubs[0];
 
   useEffect(() => {
     apiRequest<SwapHub[]>("/api/hubs")
-      .then(setSwapHubs)
-      .catch((cause: unknown) => console.error("Could not load Swap Hubs.", cause));
+      .then((hubs) => {
+        setSwapHubs(hubs);
+        if (hubs[0]) {
+          setSelectedHub(hubs[0].id);
+          setCenter(hubs[0].position);
+        }
+      })
+      .catch((cause: unknown) => {
+        setHubError(
+          cause instanceof Error ? cause.message : "Could not load Swap Hubs.",
+        );
+      })
+      .finally(() => setLoadingHubs(false));
   }, []);
 
   if (!hub) {
-    return <main className="px-4 py-8"><Link href="/" className="text-sm font-semibold text-primary">Back home</Link><p className="mt-8 rounded-2xl bg-mint-50 p-5 text-center text-sm text-ink-muted">No swap hubs are available yet.</p></main>;
+    return (
+      <main className="px-4 py-8">
+        <Link href="/" className="text-sm font-semibold text-primary">Back home</Link>
+        <p role={hubError ? "alert" : "status"} className="mt-8 rounded-2xl bg-mint-50 p-5 text-center text-sm text-ink-muted">
+          {hubError || (loadingHubs ? "Loading Swap Hubs..." : "No swap hubs are available yet.")}
+        </p>
+      </main>
+    );
+  }
+
+  function centerOnMyLocation() {
+    setLocationError("");
+    if (!navigator.geolocation) {
+      setLocationError("Location access is not supported by this browser.");
+      return;
+    }
+
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setUserLocation([position.coords.latitude, position.coords.longitude]);
+        setCenter([position.coords.latitude, position.coords.longitude]);
+        setLocating(false);
+      },
+      (error) => {
+        setLocating(false);
+        setLocationError(
+          error.code === error.PERMISSION_DENIED
+            ? "Allow location access in your browser to center the map on you."
+            : error.code === error.TIMEOUT
+              ? "Could not get your location in time. Please try again."
+              : "Could not get your location. Check your device settings and try again.",
+        );
+      },
+      { enableHighAccuracy: true, timeout: 10_000, maximumAge: 60_000 },
+    );
   }
 
   return (
@@ -46,6 +95,7 @@ export default function MapPage() {
                 if (nextHub) {
                   setSelectedHub(nextHub.id);
                   setCenter(nextHub.position);
+                  setLocationError("");
                 }
               }}
               className="max-w-[250px] bg-transparent font-medium outline-none"
@@ -54,11 +104,13 @@ export default function MapPage() {
             </select>
           </label>
         </div>
-        <button type="button" aria-label="Center on my location" onClick={() => { setCenter(defaultLocation); setSelectedHub(hub.id); }} className="rounded-full p-2 text-primary hover:bg-mint-50"><LocateFixed size={20} /></button>
+        <button type="button" aria-label="Center on my location" onClick={centerOnMyLocation} disabled={locating} className="rounded-full p-2 text-primary hover:bg-mint-50 disabled:opacity-50"><LocateFixed size={20} /></button>
       </header>
 
-      <div className="relative min-h-[340px] flex-1 overflow-hidden rounded-2xl bg-mint-50 shadow-card">
-        <MapView hubs={swapHubs} center={center} />
+      {locationError && <p role="alert" className="mb-2 rounded-xl bg-warning/15 p-3 text-xs text-warning">{locationError}</p>}
+
+      <div className="relative h-[55vh] min-h-[340px] max-h-[600px] w-full overflow-hidden rounded-2xl bg-mint-50 shadow-card">
+        {center && <MapView hubs={swapHubs} center={center} userLocation={userLocation} />}
       </div>
 
       <section className="mt-3 rounded-2xl bg-white p-4 shadow-card" aria-live="polite">

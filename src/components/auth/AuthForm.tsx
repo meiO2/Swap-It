@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
@@ -99,7 +100,20 @@ export default function AuthForm({ mode }: { mode: AuthMode }) {
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-[430px] flex-col justify-center bg-background px-5 py-10">
       <div className="rounded-3xl bg-white p-6 shadow-card">
-        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-primary">SwapIt</p>
+        {mode === "login" || mode === "register" ? (
+          <Link href="/" aria-label="SwapIt home" className="mx-auto mb-4 block w-fit">
+            <Image
+              src="/Assets/swapit-logo.png"
+              alt="SwapIt"
+              width={320}
+              height={100}
+              preload
+              className="h-auto w-56 sm:w-64"
+            />
+          </Link>
+        ) : (
+          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-primary">SwapIt</p>
+        )}
         <h1 className="mt-2 text-2xl font-bold text-ink">{headings[mode].title}</h1>
         <p className="mt-1 text-sm text-ink-muted">{headings[mode].description}</p>
         <form className="mt-6 space-y-4" onSubmit={submit}>

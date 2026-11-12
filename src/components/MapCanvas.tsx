@@ -5,14 +5,24 @@ import { CircleMarker, MapContainer, Marker, TileLayer, Tooltip, useMap } from "
 import { useEffect } from "react";
 import type { SwapHub } from "@/lib/hubs";
 
-export default function MapCanvas({ hubs, center }: { hubs: SwapHub[]; center: [number, number] }) {
+export default function MapCanvas({
+  hubs,
+  center,
+  userLocation,
+}: {
+  hubs: SwapHub[];
+  center: [number, number];
+  userLocation: [number, number] | null;
+}) {
   return (
     <MapContainer center={center} zoom={14} scrollWheelZoom={false} className="h-full w-full">
       <TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
       <MapCenter center={center} />
-      <CircleMarker center={center} radius={7} pathOptions={{ color: "var(--color-info)", fillColor: "var(--color-info)", fillOpacity: 1, weight: 5 }}>
-        <Tooltip>Universitas Prasetiya Mulya</Tooltip>
-      </CircleMarker>
+      {userLocation && (
+        <CircleMarker center={userLocation} radius={7} pathOptions={{ color: "white", fillColor: "var(--color-info)", fillOpacity: 1, weight: 3 }}>
+          <Tooltip>Your location</Tooltip>
+        </CircleMarker>
+      )}
       {hubs.map((hub) => (
         <Marker key={hub.id} position={hub.position} icon={divIcon({ className: "swap-hub-marker", html: '<span class="swap-hub-heart">♥</span>', iconSize: [34, 34], iconAnchor: [17, 17] })}>
           <Tooltip>
@@ -27,7 +37,11 @@ export default function MapCanvas({ hubs, center }: { hubs: SwapHub[]; center: [
 function MapCenter({ center }: { center: [number, number] }) {
   const map = useMap();
   useEffect(() => {
-    map.flyTo(center, 14, { duration: 0.75 });
+    const frame = window.requestAnimationFrame(() => {
+      map.invalidateSize();
+      map.flyTo(center, 14, { duration: 0.75 });
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, [center, map]);
   return null;
 }
