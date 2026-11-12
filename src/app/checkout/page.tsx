@@ -10,6 +10,7 @@ import {
   Check,
   MapPin,
   Package,
+  Trash2,
   Truck,
   X,
 } from "lucide-react";
@@ -96,6 +97,7 @@ export default function CheckoutPage() {
   const [savingAddress, setSavingAddress] = useState(false);
   const [error, setError] = useState("");
   const [placingOrder, setPlacingOrder] = useState(false);
+  const [removingProductId, setRemovingProductId] = useState<string | null>(null);
   const [etaStart, setEtaStart] = useState<string | null>(null);
   const [shippingRates, setShippingRates] = useState<ShippingRate[]>([]);
   const [shippingLoading, setShippingLoading] = useState(false);
@@ -351,6 +353,29 @@ export default function CheckoutPage() {
     }
   }
 
+  async function removeFromCheckout(productId: string) {
+    try {
+      setRemovingProductId(productId);
+      setError("");
+      await apiRequest("/api/cart", {
+        method: "DELETE",
+        body: JSON.stringify({ productId }),
+      });
+      setItems((current) =>
+        current.filter((item) => item.productId._id !== productId),
+      );
+      window.dispatchEvent(new Event("cart-updated"));
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "Could not remove this product from checkout.",
+      );
+    } finally {
+      setRemovingProductId(null);
+    }
+  }
+
   return (
     <main className="min-h-dvh px-4 pb-8 pt-5">
       <header className="mb-5 flex items-center gap-3">
@@ -435,6 +460,19 @@ export default function CheckoutPage() {
                   <p className="text-sm font-semibold text-ink">
                     {formatRupiah(product.price)}
                   </p>
+                  <button
+                    type="button"
+                    aria-label={`Remove ${product.name} from checkout`}
+                    disabled={removingProductId !== null}
+                    onClick={() => void removeFromCheckout(product._id)}
+                    className="rounded-full p-2 text-ink-muted hover:bg-danger/10 hover:text-danger disabled:opacity-50"
+                  >
+                    {removingProductId === product._id ? (
+                      <span className="text-xs">...</span>
+                    ) : (
+                      <Trash2 size={16} />
+                    )}
+                  </button>
                 </article>
               );
             })}
@@ -659,7 +697,7 @@ export default function CheckoutPage() {
               onClick={completeCheckout}
               className="h-12 w-full rounded-full bg-primary text-sm font-semibold text-white shadow-primary hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {placingOrder ? "Placing order..." : "Place order"}
+              {placingOrder ? "Checking out..." : "Check out"}
             </button>
           </div>
         </>
