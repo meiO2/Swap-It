@@ -33,8 +33,12 @@
 
     void maintainWiFiConnection() {
     if (WiFi.status() != WL_CONNECTED) {
-        Serial.println("[WIFI] Connection lost. Reconnecting...");
-        WiFi.reconnect();
+        static unsigned long lastReconnectAttempt = 0;
+        if (millis() - lastReconnectAttempt >= 5000) {
+            Serial.println("[WIFI] Connection lost. Reconnecting...");
+            WiFi.reconnect();
+            lastReconnectAttempt = millis();
+        }
     }
     }
 

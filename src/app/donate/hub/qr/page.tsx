@@ -3,11 +3,11 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { QRCodeSVG } from "qrcode.react";
-import { Check, Clock3, Phone, RefreshCw, ScanLine } from "lucide-react";
+import { Check, Clock3, Phone, RefreshCw } from "lucide-react";
 import { HubStepGuard, HubLocationCard } from "@/components/hub/hub-ui";
 import { useHubSession } from "@/store/hubSession";
 import { QR_TTL_SECONDS } from "@/lib/hub";
-import { apiRequest } from "@/lib/api";
+import { ApiError, apiRequest } from "@/lib/api";
 
 type DonationRecord = { status: string };
 
@@ -20,13 +20,15 @@ function QrContent() {
   const donationId = useHubSession((state) => state.donationId);
   const setDonationId = useHubSession((state) => state.setDonationId);
   const setQrCredential = useHubSession((state) => state.setQrCredential);
-  const markScanned = useHubSession((state) => state.markScanned);
   const markHubScanned = useHubSession((state) => state.markHubScanned);
   const [now, setNow] = useState<number | null>(null);
-  const [isVerifying, setIsVerifying] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [actionError, setActionError] = useState("");
+  const [connectionError, setConnectionError] = useState("");
+  const [scanConfirmed, setScanConfirmed] = useState(false);
+  const [verificationFailed, setVerificationFailed] = useState(false);
   const qrRequestInFlight = useRef(false);
+  const statusRequestInFlight = useRef(false);
   const showError = actionError;
 
   useEffect(() => {
@@ -81,18 +83,30 @@ function QrContent() {
   }, [code, donationId, issueQrCode]);
 
   useEffect(() => {
-    if (!donationId || !code) return;
+    if (!donationId || !code || scanConfirmed || verificationFailed) return;
     let active = true;
     const checkStatus = async () => {
+      if (statusRequestInFlight.current) return;
+      statusRequestInFlight.current = true;
       try {
         const donation = await apiRequest<DonationRecord>(`/api/donations/${encodeURIComponent(donationId)}`);
         if (!active) return;
-        if (donation.status === "QR_SCANNED" || donation.status === "UNDER_VERIFICATION") {
+        setConnectionError("");
+        if (["QR_SCANNED", "DEPOSITING", "UNDER_VERIFICATION", "COMPLETED"].includes(donation.status)) {
           markHubScanned();
-          router.push("/donate/hub/insert");
+          setScanConfirmed(true);
+        } else if (donation.status === "CANCELLED") {
+          setVerificationFailed(true);
         }
       } catch (reason) {
-        if (active) setActionError(reason instanceof Error ? reason.message : "Could not check the donation status.");
+        if (!active) return;
+        if (reason instanceof ApiError && [401, 403, 404].includes(reason.status)) {
+          setVerificationFailed(true);
+        } else {
+          setConnectionError(reason instanceof Error ? reason.message : "Could not check the donation status.");
+        }
+      } finally {
+        statusRequestInFlight.current = false;
       }
     };
     void checkStatus();
@@ -101,31 +115,35 @@ function QrContent() {
       active = false;
       window.clearInterval(timerId);
     };
-  }, [code, donationId, markHubScanned, router]);
+  }, [code, donationId, markHubScanned, scanConfirmed, verificationFailed]);
+
+  useEffect(() => {
+    if (!scanConfirmed) return;
+    const timerId = window.setTimeout(() => router.push("/donate/hub/insert"), 700);
+    return () => window.clearTimeout(timerId);
+  }, [router, scanConfirmed]);
 
   const remaining = !expiresAt || now === null ? QR_TTL_SECONDS : Math.max(0, Math.ceil((expiresAt - now) / 1000));
   const isExpired = Boolean(code) && now !== null && remaining === 0;
   const timer = `${String(Math.floor(remaining / 60)).padStart(2, "0")}:${String(remaining % 60).padStart(2, "0")}`;
 
-  function simulateScan() {
-    if (isExpired || isVerifying) return;
-    setActionError("Prototype-only scan: this does not verify a Hub deposit. Use the ESP32 scanner for a real donation.");
-    setIsVerifying(true);
-    window.setTimeout(() => {
-      try {
-        markScanned();
-        router.push("/donate/hub/insert");
-      } catch (reason) {
-        setActionError(reason instanceof Error ? reason.message : "The Hub could not verify this QR code.");
-        setIsVerifying(false);
-      }
-    }, 450);
-  }
-
   return (
     <HubStepGuard step="qr">
       <main className="flex flex-1 flex-col pt-5">
         <HubLocationCard hubId={hubId} />
+
+        {verificationFailed && (
+          <section aria-live="polite" className="mt-4 rounded-2xl border border-danger/15 bg-red-50 p-4">
+            <h1 className="text-sm font-bold text-danger">QR verification failed</h1>
+            <p className="mt-1 text-xs leading-relaxed text-danger/85">This donation session is no longer valid. Start a new donation session to continue.</p>
+          </section>
+        )}
+
+        {scanConfirmed && (
+          <div aria-live="polite" className="mt-4 flex min-h-11 items-center justify-center gap-2 rounded-full bg-hub-mint px-4 text-xs font-medium text-hub-primary">
+            <Check size={16} /> QR successfully scanned by the physical Hub
+          </div>
+        )}
 
         {isExpired && (
           <section aria-live="polite" className="mt-4 rounded-2xl border border-danger/15 bg-red-50 p-4">
@@ -144,7 +162,7 @@ function QrContent() {
           <div className="mx-auto flex w-full max-w-[224px] items-center justify-center rounded-2xl bg-hub-mint p-3">
             {code ? <QRCodeSVG value={code} size={196} title="Your unique Swap Hub donation QR code" className="h-auto w-full" /> : <p className="p-8 text-center text-xs text-hub-muted">Generating secure QR code…</p>}
           </div>
-          <p className="mx-auto mt-3 w-fit rounded-full bg-hub-mint px-4 py-2 text-sm font-bold tracking-[0.12em] text-hub-ink">{code ? "Secure Hub QR ready" : "Creating secure code…"}</p>
+          <p className="mx-auto mt-3 w-fit rounded-full bg-hub-mint px-4 py-2 text-sm font-bold tracking-[0.12em] text-hub-ink">{code ? "Secure Hub QR ready" : "Generating QR code…"}</p>
           {!isExpired && (
             <div className="mt-4 flex items-center justify-between gap-2">
               <p aria-live="polite" className="flex items-center gap-1.5 text-xs text-hub-muted"><Clock3 size={15} /> Valid for {timer}</p>
@@ -157,16 +175,13 @@ function QrContent() {
           <>
             <p className="mt-4 flex items-center gap-3 px-1 text-xs leading-relaxed text-hub-muted"><Phone size={20} className="shrink-0 text-hub-primary" /> Hold your phone up to the scanner on the Swap Hub.</p>
             <div aria-live="polite" className="mt-4 flex min-h-11 items-center justify-center gap-2 rounded-full bg-hub-mint px-4 text-xs font-medium text-hub-primary">
-              {isVerifying ? <Check size={16} /> : <RefreshCw size={15} className="animate-spin" />}
-              {isVerifying ? "Prototype scan only — awaiting the real Hub" : "Waiting for the Hub to scan…"}
+              {scanConfirmed ? <Check size={16} /> : <RefreshCw size={15} className="animate-spin" />}
+              {scanConfirmed ? "QR successfully scanned" : "Waiting for physical Hub scanner…"}
             </div>
-            <div className="my-4 flex items-center gap-3 text-[10px] font-medium text-hub-muted"><span className="h-px flex-1 bg-hub-line" /> OR <span className="h-px flex-1 bg-hub-line" /></div>
-            <button type="button" onClick={simulateScan} disabled={isVerifying} className="flex min-h-[60px] w-full items-center justify-center gap-3 rounded-2xl bg-hub-mint px-4 text-sm font-semibold text-hub-primary transition hover:bg-hub-mint-strong disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-hub-primary">
-              <ScanLine size={21} />               <span>Simulate Hub scan <span className="block text-[10px] font-normal text-hub-muted">(prototype only; no deposit is verified)</span></span>
-            </button>
           </>
         )}
         {showError && <p role="alert" className="mt-3 rounded-xl bg-red-50 p-3 text-xs text-danger">{showError}</p>}
+        {connectionError && <p role="status" className="mt-3 rounded-xl bg-amber-50 p-3 text-xs text-amber-800">Connection error: {connectionError}. Retrying donation status check…</p>}
 
       </main>
     </HubStepGuard>

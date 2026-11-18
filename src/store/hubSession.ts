@@ -15,7 +15,6 @@ type HubSession = {
   itemCount: number;
   startSession: (hubId?: string) => void;
   setQrCredential: (code: string, expiresAt: number) => void;
-  markScanned: () => void;
   markHubScanned: () => void;
   setHubId: (hubId: string) => void;
   setDonationId: (donationId: string) => void;
@@ -49,13 +48,6 @@ export const useHubSession = create<HubSession>()(
           throw new RangeError("A valid, unexpired Hub QR credential is required.");
         }
         set({ code, expiresAt });
-      },
-      markScanned: () => {
-        const session = get();
-        if (session.status !== "qr_shown" || session.expiresAt <= Date.now()) {
-          throw new RangeError("This donation QR code has expired. Refresh it before continuing.");
-        }
-        set({ status: "scanned" });
       },
       markHubScanned: () => set({ status: "scanned" }),
       setHubId: (hubId) => {

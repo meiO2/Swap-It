@@ -1,6 +1,7 @@
 
 #include "config/config.h"
 #include "camera/camera.h"
+#include "camera/qr_scanner.h"
 #include "wifi/wifi_manager.h"
 #include "api/api_client.h"
 #include "access/access_control.h"
@@ -50,6 +51,7 @@ void setup() {
     // CAMERA FIRST
     Serial.println("\n[SYSTEM] Starting camera...");
     initializeCamera();
+    initializeQrScanner();
 
     // WIFI
     Serial.println("\n[SYSTEM] Starting WiFi...");
@@ -86,17 +88,23 @@ void loop() {
     handleCameraServer();
 
     if (Serial.available()) {
+        Serial.setTimeout(20);
         String qrCode = Serial.readStringUntil('\n');
         qrCode.trim();
 
-        if (qrCode.length() > 0) {
-            if (qrCode == "CLOSE") {
-                closeAccess();
-            } else {
-                processSimulatedAccessRequest(qrCode);
-            }
+        if (qrCode == "CLOSE") {
+            closeAccess();
+        } else if (qrCode.length() > 0) {
+            Serial.println("[INPUT] Serial token input is disabled; scan a QR with the camera.");
         }
     }
 
-    delay(100);
+    if (WiFi.status() == WL_CONNECTED && !isDoorUnlocked() && !isAccessRequestInFlight()) {
+        String qrToken;
+        if (readQRCodeFrame(qrToken)) {
+            processAccessRequest(qrToken);
+        }
+    }
+
+    delay(20);
 }

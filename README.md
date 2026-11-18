@@ -74,10 +74,11 @@ The ledger supports `EARN`, `REDEEM`, `REFUND`, `EXPIRE`, `ADJUSTMENT`, and
 - The backend requires MongoDB transactions for atomic Hub confirmation and
   finalization, so production MongoDB must support transactions (replica set
   or sharded cluster).
-- The ESP32 sketch remains a serial prototype: it still targets a legacy
-  verification path and does not yet send authenticated door events. A device
-  must be provisioned with its Hub credentials and send `/api/iot/scan` and
-  `/api/iot/door-event` requests to use the physical workflow.
+- The ESP32 firmware scans the physical camera feed, converts JPEG frames to
+  grayscale for QR decoding, and submits decoded tokens to the authenticated
+  `/api/iot/scan` endpoint. The lock remains simulated; firmware does not
+  activate a GPIO output. An authorized device session is retained for later
+  `/api/iot/door-event` reporting.
 
 ### Community and sustainability
 
@@ -332,6 +333,88 @@ The backfill endpoint is admin-only and idempotent.
 - `GET /api/news`
 - `GET /api/revamp`
 - `POST /api/shipping/rates`
+
+### ESP32 Swap Hub setup
+
+The existing donation QR flow issues one-time, five-minute access tokens.
+Only a successful scan by a registered Hub device updates the donation to
+`QR_SCANNED`; the website then advances to item insertion. The ESP32 does not
+complete a donation: physical door events and later admin verification remain
+separate steps.
+
+#### Arduino dependencies and board setup
+
+1. In Arduino IDE, install **esp32 by Espressif Systems 3.x** using Boards
+   Manager, then select **ESP32S3 Dev Module**. Enable OPI PSRAM and use the
+   board's 16 MB flash / 8 MB PSRAM settings.
+2. Download the
+   [ESP32QRCodeReader 1.1.0 source ZIP](https://github.com/alvarowolfx/ESP32QRCodeReader)
+   and install it with **Sketch > Include Library > Add .ZIP Library**. The
+   firmware uses its bundled `quirc` decoder core only; it does not instantiate
+   the library's camera reader, so the existing JPEG camera setup and pin map
+   remain in use.
+3. Install **ArduinoJson** by Benoit Blanchon from Library Manager (version 6
+   or newer).
+4. Open `SwapHub_ESP32/SwapHub_ESP32.ino`. Keep the camera pin definitions in
+   `camera/camera.h` unchanged.
+
+The scanner captures the existing JPEG frames, converts each frame to RGB888
+with the ESP32 camera driver's `fmt2rgb888`, converts RGB pixels to grayscale,
+then passes that grayscale image to `quirc`. It does not pass JPEG bytes
+directly to the QR decoder. The ESP32-S3's PSRAM is required for the image and
+decoder buffers.
+
+#### Device credentials
+
+`SwapHub_ESP32/config/secrets.h` is ignored by Git. Keep the existing local
+file private; it must define `WIFI_SSID`, `WIFI_PASSWORD`, `API_BASE_URL`,
+`DEVICE_ID`, and `DEVICE_API_KEY`. Set the backend URL to
+`https://swapitproject.web.id`, the device ID to the provisioned device ID,
+and keep the API key only in this ignored file. Never paste the key into
+source, serial logs, frontend code, or a support request.
+
+Firmware validates TLS using the public ISRG Root X1 trust anchor in
+`SwapHub_ESP32/config/root_ca.h`; it synchronizes the clock before opening a
+verified HTTPS connection. It does not disable certificate checks. The apex
+domain currently redirects to its `www` host, so firmware follows only that
+exact HTTPS redirect and rejects any other redirect before forwarding device
+credentials. It submits a decoded token at most once per boot, including after
+an HTTP timeout, because the backend may have consumed the one-time token
+before a response was lost.
+
+#### Physical acceptance test plan
+
+Use a registered active device and a test user account. Confirm the production
+`MONGODB_URI` is set in Vercel's Production environment and that the registered
+device maps to the intended Hub before testing; do not overwrite existing
+deployment variables. Do not test by sharing device credentials.
+
+1. Start a donation at `hub-prasmul` and verify the site creates a donation
+   session and displays its generated QR.
+2. Verify the displayed QR contains the token issued by
+   `POST /api/hubs/access-token` (do not log or publish the token).
+3. Point the ESP32-S3 camera at the QR and verify Serial reports that a
+   SwapIt access token was decoded.
+4. Verify the ESP32 sends HTTPS `POST /api/iot/scan` with the device headers
+   and `{ "token": "..." }`.
+5. Verify the backend authenticates `SWAPHUB-BSD-001` and resolves it to
+   `hub-prasmul`.
+6. Verify one scan consumes the token once and creates an authorized device
+   session. Repeating the same QR must not submit it again from that boot.
+7. Verify MongoDB donation status becomes `QR_SCANNED`.
+8. Verify the QR page polls the donor-owned donation record and advances to
+   `/donate/hub/insert` only after that backend status is observed.
+9. Verify no QR-scan path marks the donation as deposited or complete and no
+   lock GPIO is activated.
+10. Exercise invalid, expired, reused, and other-Hub QR tokens; invalid device
+    credentials; Wi-Fi loss; HTTPS timeout; and duplicate camera frames.
+    Expected rejections must not authorize a simulated unlock. After an
+    ambiguous timeout, issue a fresh QR rather than retrying the old token.
+
+No physical end-to-end run is implied by these instructions. The QR flow can
+be validated in software; camera decoding, network access from the device,
+production environment configuration, and physical hardware behavior still
+require testing on the actual board and deployment.
 
 ### Messaging and profile
 
