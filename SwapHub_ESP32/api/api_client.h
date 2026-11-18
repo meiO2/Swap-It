@@ -148,7 +148,8 @@ bool verifyQRCode(const String &qrCode, String &sessionId) {
     const char *returnedSessionId = response["data"]["sessionId"] | "";
     if (response["success"] != true ||
         strcmp(action, "UNLOCK") != 0 ||
-        strlen(returnedSessionId) != 24) {
+        strlen(returnedSessionId) == 0 ||
+        strlen(returnedSessionId) > 128) {
         const char *message = response["message"] | "Unexpected authorization response.";
         Serial.print("[API] Backend did not authorize access: ");
         Serial.println(message);
@@ -166,7 +167,7 @@ bool reportDoorEvent(const String &sessionId, const char *event) {
         strcmp(event, "ITEM_DETECTED") == 0 ||
         strcmp(event, "DOOR_CLOSED") == 0 ||
         strcmp(event, "DOOR_LOCKED") == 0;
-    if (!allowedEvent || sessionId.length() != 24) {
+    if (!allowedEvent || sessionId.length() == 0 || sessionId.length() > 128) {
         Serial.println("[API] Invalid device session or door event.");
         return false;
     }

@@ -1,3 +1,6 @@
+#include <Arduino.h>
+
+SET_LOOP_TASK_STACK_SIZE(16384);
 
 #include "config/config.h"
 #include "camera/camera.h"
@@ -10,73 +13,50 @@
 // SETUP
 // ==========================================
 
+
 void setup() {
     Serial.begin(115200);
-    delay(1500);
+    delay(2500);
 
-    // MEMORY DIAGNOSTICS
-    Serial.println("\n========== MEMORY TEST ==========");
+    Serial.println();
+    Serial.println("========== SWAP HUB BOOT ==========");
 
-    if (psramFound()) {
-        Serial.println("[MEMORY] PSRAM detected!");
+    Serial.println("[DEBUG 1] Serial initialized.");
 
-        Serial.printf(
-            "[MEMORY] PSRAM Size: %u bytes\n",
-            ESP.getPsramSize()
-        );
+    Serial.println("[DEBUG 2] Checking PSRAM...");
+    Serial.printf("PSRAM: %s\n", psramFound() ? "YES" : "NO");
 
-        Serial.printf(
-            "[MEMORY] Free PSRAM: %u bytes\n",
-            ESP.getFreePsram()
-        );
-
-    } else {
-        Serial.println("[MEMORY] PSRAM NOT DETECTED!");
-    }
-
-    Serial.printf(
-        "[MEMORY] Heap Size: %u bytes\n",
-        ESP.getHeapSize()
-    );
-
-    Serial.println("=================================");
-
-    // SYSTEM INITIALIZATION
-    Serial.println("\n================================");
-    Serial.println("       SWAP HUB CONTROLLER");
-    Serial.println("================================");
-
-    Serial.println("Firmware: " FIRMWARE_VERSION);
-
-    // CAMERA FIRST
-    Serial.println("\n[SYSTEM] Starting camera...");
+    Serial.println("[DEBUG 3] Starting camera...");
     initializeCamera();
+
+    Serial.println("[DEBUG 4] Camera initialization returned.");
+
+    Serial.println("[DEBUG 5] Starting QR scanner...");
     initializeQrScanner();
 
-    // WIFI
-    Serial.println("\n[SYSTEM] Starting WiFi...");
+    Serial.println("[DEBUG 6] QR scanner initialization returned.");
+
+    Serial.println("[DEBUG 7] Starting WiFi...");
     initializeWiFi();
 
-    // Start camera web server AFTER Wi-Fi connects
-    if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("[DEBUG 8] WiFi initialization returned.");
 
+    if (isWiFiConnected()) {
         startCameraServer();
-
-        Serial.print("[CAMERA SERVER] Open this URL: http://");
+        Serial.print("[CAMERA SERVER] URL: http://");
         Serial.println(WiFi.localIP());
-
-    } else {
-        Serial.println("[CAMERA SERVER] Waiting for Wi-Fi connection.");
     }
 
-    // API
+    Serial.println("[DEBUG 9] Initializing API...");
     initializeAPI();
 
-    // ACCESS CONTROL
+    Serial.println("[DEBUG 10] Initializing access control...");
     initializeAccessControl();
+    startQrScannerTask();
 
     Serial.println("\n[SYSTEM] Initialization complete.");
 }
+
 
 // ==========================================
 // MAIN LOOP
@@ -84,6 +64,13 @@ void setup() {
 
 void loop() {
     maintainWiFiConnection();
+
+    // Start the preview server if Wi-Fi connects after initial setup.
+    if (isWiFiConnected() && !cameraServerStarted && isCameraReady()) {
+        startCameraServer();
+        Serial.print("[CAMERA SERVER] URL: http://");
+        Serial.println(WiFi.localIP());
+    }
 
     handleCameraServer();
 
@@ -99,11 +86,20 @@ void loop() {
         }
     }
 
-    if (WiFi.status() == WL_CONNECTED && !isDoorUnlocked() && !isAccessRequestInFlight()) {
-        String qrToken;
-        if (readQRCodeFrame(qrToken)) {
-            processAccessRequest(qrToken);
-        }
+    static unsigned long lastStackCheck = 0;
+
+    if (millis() - lastStackCheck >= 5000) {
+        lastStackCheck = millis();
+
+        Serial.printf(
+            "[MEMORY] Loop stack remaining: %u bytes\n",
+            uxTaskGetStackHighWaterMark(NULL)
+        );
+        Serial.printf(
+            "[MEMORY] Free heap: %u bytes; Free PSRAM: %u bytes\n",
+            static_cast<unsigned int>(ESP.getFreeHeap()),
+            static_cast<unsigned int>(ESP.getFreePsram())
+        );
     }
 
     delay(20);
