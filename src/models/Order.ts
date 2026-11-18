@@ -122,6 +122,12 @@ export interface IOrder {
   subtotal: number;
   shippingFee: number;
   serviceFee: number;
+  sellerFeeSnapshots?: Array<{
+    sellerId: mongoose.Types.ObjectId;
+    subtotal: number;
+    transactionFee: number;
+    netAmount: number;
+  }>;
   gpUsed: number;
   totalAmount: number;
   deliveryMethod: DeliveryMethod;
@@ -304,6 +310,16 @@ const OrderSchema = new Schema<IOrder>(
     subtotal: { type: Number, required: true, min: 1 },
     shippingFee: { type: Number, required: true, min: 0, default: 0 },
     serviceFee: { type: Number, required: true, min: 0, default: 0 },
+    sellerFeeSnapshots: {
+      type: [{
+        sellerId: { type: Schema.Types.ObjectId, ref: "User", required: true },
+        subtotal: { type: Number, required: true, min: 0 },
+        transactionFee: { type: Number, required: true, min: 0 },
+        netAmount: { type: Number, required: true, min: 0 },
+        _id: false,
+      }],
+      default: undefined,
+    },
     gpUsed: { type: Number, required: true, min: 0, default: 0 },
     totalAmount: { type: Number, required: true, min: 1 },
     deliveryMethod: {

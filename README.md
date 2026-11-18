@@ -192,6 +192,8 @@ CLOUDINARY_API_SECRET=...
   `https://<your-domain>/api/payments/webhook`. Copy its callback verification
   token into `XENDIT_CALLBACK_TOKEN`.
 - Xendit dynamic QRIS transactions must be between Rp1.500 and Rp10.000.000.
+- The payment page offers a test-only simulation button when `XENDIT_SECRET_KEY`
+  uses an Xendit development key. The simulation API rejects production keys.
 - `SHIPPING_MODE=mock` is the default development mode.
 - Set `SHIPPING_MODE=biteship` to use Biteship.
 - Biteship API keys must remain server-side.
@@ -298,6 +300,8 @@ shipping, GP redemption, and total amount from server-side data.
   - Creates one dynamic QRIS code and returns its QR string for inline display.
 - `GET /api/payments`
 - `POST /api/payments/webhook` receives Xendit QR payment callbacks.
+- `POST /api/payments/simulate` simulates a payment only when the server uses an
+  Xendit development key and the authenticated user owns the pending order.
 
 QRIS must be enabled for the merchant account. Cash refunds use Xendit's refund
 API when the original payment channel supports API refunds; any rejected refund
@@ -365,6 +369,13 @@ the rate before saving the order.
 
 The amount sent to Xendit is calculated from the stored order, including
 shipping, service fees, and redeemed Green Points.
+
+The buyer service fee is 2.5% of the product subtotal, rounded to the nearest
+rupiah. At checkout, each seller's product subtotal must be at least Rp5.500.
+New orders record an initial estimate of the seller's net after a Rp5.500
+transaction fee per seller per order. This snapshot does not process a fee or
+adjust for later refunds; seller balances, settlement, and bank withdrawals
+are not implemented.
 
 Before deploying this provider change, complete or cancel any outstanding
 Midtrans payments; the payment webhook now handles Xendit QR payment events.

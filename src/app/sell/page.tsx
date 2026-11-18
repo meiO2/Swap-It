@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft, Camera, CircleHelp } from "lucide-react";
 import { ChangeEvent, FormEvent, use, useEffect, useState } from "react";
 import { apiRequest } from "@/lib/api";
+import { parseListingPrice } from "@/lib/format";
 import type { IUserAddress } from "@/models/User";
 
 type EditableProduct = {
@@ -14,6 +15,7 @@ type EditableProduct = {
   name: string;
   description: string;
   category: string;
+  brand?: string;
   price: number;
   size: string;
   condition: "NEW" | "LIKE_NEW" | "GOOD" | "FAIR";
@@ -110,7 +112,7 @@ export default function SellPage({
       formData.get("description") ?? "",
     ).trim();
 
-    const price = Number(formData.get("price"));
+    const price = parseListingPrice(String(formData.get("price") ?? ""));
     const image = String(formData.get("image") ?? "").trim();
     const imageFiles = formData
       .getAll("images")
@@ -130,8 +132,8 @@ export default function SellPage({
       return;
     }
 
-    if (!Number.isFinite(price) || price <= 0) {
-      setError("Enter a positive product price.");
+    if (price === null) {
+      setError("Enter a whole rupiah price, for example 50000 or 50.000.");
       return;
     }
 
@@ -176,6 +178,7 @@ export default function SellPage({
         name,
         description,
         category: String(formData.get("category") ?? ""),
+        brand: String(formData.get("brand") ?? "").trim(),
         size: String(formData.get("size") ?? ""),
         condition: String(formData.get("condition") ?? ""),
         price,
@@ -327,6 +330,16 @@ export default function SellPage({
           />
         </Field>
 
+        <Field label="Brand (optional)">
+          <input
+            name="brand"
+            maxLength={80}
+            defaultValue={editingProduct?.brand ?? ""}
+            placeholder="e.g. Uniqlo"
+            className="form-input"
+          />
+        </Field>
+
         <div className="grid grid-cols-2 gap-3">
           <Field label="Category">
             <select
@@ -405,12 +418,11 @@ export default function SellPage({
         <Field label="Listing price (Rp)">
           <input
             name="price"
-            type="number"
-            min="1"
-            step="1"
+            type="text"
+            inputMode="numeric"
             required
             defaultValue={editingProduct?.price}
-            placeholder="125000"
+            placeholder="125.000"
             className="form-input"
           />
         </Field>

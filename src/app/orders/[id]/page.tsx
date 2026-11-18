@@ -181,6 +181,16 @@ function OrderDetailsContent() {
         {delivery?.method === "courier" && delivery.address && <div className="mt-4 border-t border-border pt-3"><p className="text-xs font-semibold text-ink">Delivery address</p><p className="mt-1 text-xs text-ink-muted">{delivery.address.name} · {delivery.address.phone}</p><p className="mt-1 text-xs leading-relaxed text-ink-muted">{delivery.address.address}, {delivery.address.city} {delivery.address.postalCode}</p></div>}
       </section>
 
+      {viewOrder.sellerFeeSnapshot && (
+        <section className="rounded-3xl bg-white p-4 shadow-card">
+          <h2 className="text-base font-semibold text-ink">Seller fee estimate</h2>
+          <SummaryRow label="Your product value" value={formatRupiah(viewOrder.sellerFeeSnapshot.subtotal)} />
+          <SummaryRow label="Transaction fee" value={`−${formatRupiah(viewOrder.sellerFeeSnapshot.transactionFee)}`} />
+          <SummaryRow label="Estimated net" value={formatRupiah(viewOrder.sellerFeeSnapshot.netAmount)} strong />
+          <p className="mt-2 text-xs text-ink-muted">Recorded at checkout only. Refunds or cancelled items may change the final amount. Seller balances and payouts are not yet available.</p>
+        </section>
+      )}
+
       {helpOpen && <HelpSheet onClose={() => setHelpOpen(false)} />}
     </main>
   );

@@ -2,6 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 import type { Product } from "@/data/mock";
 import FavoriteButton from "@/components/ui/FavoriteButton";
+import { formatPrice } from "@/lib/format";
 
 export default function ProductCard({ product, priority = false }: { product: Product; priority?: boolean }) {
   return (
@@ -23,8 +24,7 @@ export default function ProductCard({ product, priority = false }: { product: Pr
         <p className="truncate text-[13px] font-medium text-ink">{product.name}</p>
         <p className="mt-1 text-xs text-ink-muted">{product.condition}</p>
         <div className="mt-2 flex items-center justify-between gap-1">
-          <span className="text-sm font-semibold text-primary">{product.gpPrice.toLocaleString("id-ID")} GP</span>
-          <span className="text-[10px] text-ink-muted">≈ Rp{product.price.toLocaleString("id-ID")}</span>
+          <span className="text-sm font-semibold text-primary">{formatPrice(product.price)}</span>
         </div>
       </div>
       </Link>

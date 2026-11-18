@@ -57,6 +57,11 @@ export type OrderShape = {
   productValue: number;
   shippingFee: number;
   serviceFee: number;
+  sellerFeeSnapshot?: {
+    subtotal: number;
+    transactionFee: number;
+    netAmount: number;
+  };
   gpUsed: number;
   moneyPaid: number;
   status: OrderStatus;

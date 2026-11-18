@@ -8,6 +8,7 @@ import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 
 import { catalogProducts } from "@/data/mock";
 import StatusBadge from "@/components/ui/StatusBadge";
+import { formatPrice } from "@/lib/format";
 import { useSwapStore } from "@/store/useSwapStore";
 
 interface Participant {
@@ -320,7 +321,7 @@ export default function ChatThread({
               {pinnedProduct.name}
             </p>
             <p className="mt-0.5 text-xs font-semibold text-primary">
-              {pinnedProduct.gpPrice.toLocaleString("id-ID")} GP
+              {formatPrice(pinnedProduct.price)}
             </p>
           </div>
 

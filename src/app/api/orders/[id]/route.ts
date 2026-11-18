@@ -69,6 +69,12 @@ export async function GET(
       success: true,
       data: {
         ...order,
+        sellerFeeSnapshots: undefined,
+        sellerFeeSnapshot: isBuyer
+          ? undefined
+          : order.sellerFeeSnapshots?.find(
+              (snapshot) => snapshot.sellerId.toString() === auth.user.id,
+            ),
         id: order._id.toString(),
         timeline,
         progress: timelineIndex / 5,

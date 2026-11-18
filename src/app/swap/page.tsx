@@ -9,6 +9,7 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import type { Product } from "@/data/mock";
 import { mapApiProduct, type ApiProduct } from "@/lib/products";
+import { formatPrice } from "@/lib/format";
 
 export default function SwapPage() {
   const router = useRouter();
@@ -201,7 +202,7 @@ export default function SwapPage() {
               <p className="mb-1 flex items-center gap-1.5 text-xs text-white/85"><MapPin size={14} /> {activeProduct.distance}</p>
               <h2 className="text-2xl font-bold">{activeProduct.name}</h2>
               <p className="mt-1 text-sm text-white/85">{activeProduct.condition} · {activeProduct.category}</p>
-              <p className="mt-2 text-sm font-semibold">{activeProduct.gpPrice.toLocaleString("id-ID")} GP</p>
+              <p className="mt-2 text-sm font-semibold">{formatPrice(activeProduct.price)}</p>
             </div>
           </motion.article>
         </AnimatePresence>

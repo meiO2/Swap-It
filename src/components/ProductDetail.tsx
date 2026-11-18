@@ -12,7 +12,7 @@ import {
   ShoppingBag,
 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { formatRupiah } from "@/lib/format";
+import { formatPrice } from "@/lib/format";
 import { apiRequest } from "@/lib/api";
 import {
   HandoverCard,
@@ -335,7 +335,7 @@ export default function ProductDetail({ id }: { id: string }) {
           </div>
 
           <p className="mt-3 text-xl font-bold text-primary">
-            {formatRupiah(product.price)}
+            {formatPrice(product.price)}
           </p>
         </section>
 
@@ -431,40 +431,40 @@ export default function ProductDetail({ id }: { id: string }) {
           </p>
         )}
 
-        <div className="grid grid-cols-2 gap-2">
-          <button
-            type="button"
-            onClick={() => void handleStartChat()}
-            disabled={startingChat || isOwner}
-            className="flex h-11 items-center justify-center gap-2 rounded-full border border-border bg-white text-xs font-semibold text-ink hover:bg-mint-50"
-          >
-            <MessageCircle size={16} />
-            {startingChat
-              ? "Opening chat..."
-              : isOwner
-                ? "Your listing"
-                : "Chat seller"}
-          </button>
+        {!isOwner && (
+          <>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => void handleStartChat()}
+                disabled={startingChat}
+                className="flex h-11 items-center justify-center gap-2 rounded-full border border-border bg-white text-xs font-semibold text-ink hover:bg-mint-50"
+              >
+                <MessageCircle size={16} />
+                {startingChat ? "Opening chat..." : "Chat seller"}
+              </button>
 
-          <button
-            type="button"
-            disabled={adding || added}
-            onClick={() => handleAddToCart()}
-            className="flex h-11 items-center justify-center gap-2 rounded-full border border-primary text-xs font-semibold text-primary hover:bg-mint-50 disabled:opacity-60"
-          >
-            <ShoppingBag size={16} />
-            {adding ? "Adding..." : added ? "Already in cart" : "Add to cart"}
-          </button>
-        </div>
+              <button
+                type="button"
+                disabled={adding || added}
+                onClick={() => handleAddToCart()}
+                className="flex h-11 items-center justify-center gap-2 rounded-full border border-primary text-xs font-semibold text-primary hover:bg-mint-50 disabled:opacity-60"
+              >
+                <ShoppingBag size={16} />
+                {adding ? "Adding..." : added ? "Already in cart" : "Add to cart"}
+              </button>
+            </div>
 
-        <button
-          type="button"
-          disabled={adding}
-          onClick={handleBuyNow}
-          className="h-12 w-full rounded-full bg-primary text-sm font-semibold text-white shadow-primary hover:bg-primary-dark disabled:opacity-60"
-        >
-          {adding ? "Please wait..." : "Buy now"}
-        </button>
+            <button
+              type="button"
+              disabled={adding}
+              onClick={handleBuyNow}
+              className="h-12 w-full rounded-full bg-primary text-sm font-semibold text-white shadow-primary hover:bg-primary-dark disabled:opacity-60"
+            >
+              {adding ? "Please wait..." : "Buy now"}
+            </button>
+          </>
+        )}
       </div>
     </main>
   );

@@ -10,6 +10,7 @@ import {
   Check,
   MapPin,
   Package,
+  Trash2,
   Truck,
   X,
 } from "lucide-react";
@@ -18,7 +19,12 @@ import type { IUserAddress } from "@/models/User";
 import { estimateArrival, formatOrderDate } from "@/lib/orders";
 import { formatRupiah } from "@/lib/format";
 import { apiRequest } from "@/lib/api";
-import { calculateBuyerServiceFee } from "@/lib/fees";
+import {
+  calculateBuyerServiceFee,
+  calculateSellerFeeSnapshots,
+  SELLER_MINIMUM_MESSAGE,
+} from "@/lib/fees";
+import { QRIS_AMOUNT_MESSAGE, QRIS_MAX_AMOUNT, QRIS_MIN_AMOUNT } from "@/lib/payment-limits";
 
 interface CartProduct {
   _id: string;
@@ -27,6 +33,7 @@ interface CartProduct {
   size: string;
   condition: string;
   images: string[];
+  sellerId: string;
 }
 
 interface CartItem {
@@ -90,6 +97,7 @@ export default function CheckoutPage() {
   const [savingAddress, setSavingAddress] = useState(false);
   const [error, setError] = useState("");
   const [placingOrder, setPlacingOrder] = useState(false);
+  const [removingProductId, setRemovingProductId] = useState<string | null>(null);
   const [etaStart, setEtaStart] = useState<string | null>(null);
   const [shippingRates, setShippingRates] = useState<ShippingRate[]>([]);
   const [shippingLoading, setShippingLoading] = useState(false);
@@ -113,6 +121,14 @@ export default function CheckoutPage() {
   );
 
   const serviceFee = calculateBuyerServiceFee(subtotal);
+  const sellerMinimumFailed = calculateSellerFeeSnapshots(
+    items.map((item) => ({
+      sellerId: item.productId.sellerId,
+      price: item.productId.price,
+    })),
+  ).some((snapshot) => snapshot.netAmount < 0);
+  const paymentAmount = subtotal + (selectedShippingRate?.price ?? 0) + serviceFee - gpUsed;
+  const paymentAmountInvalid = paymentAmount < QRIS_MIN_AMOUNT || paymentAmount > QRIS_MAX_AMOUNT;
   const eta = etaStart
     ? estimateArrival(etaStart, courier.minDays, courier.maxDays)
     : null;
@@ -293,7 +309,7 @@ export default function CheckoutPage() {
   }
 
   async function completeCheckout() {
-    if (!items.length || !methodValid || placingOrder) return;
+    if (!items.length || !methodValid || sellerMinimumFailed || paymentAmountInvalid || placingOrder) return;
 
     setPlacingOrder(true);
     setError("");
@@ -334,6 +350,29 @@ export default function CheckoutPage() {
       );
     } finally {
       setPlacingOrder(false);
+    }
+  }
+
+  async function removeFromCheckout(productId: string) {
+    try {
+      setRemovingProductId(productId);
+      setError("");
+      await apiRequest("/api/cart", {
+        method: "DELETE",
+        body: JSON.stringify({ productId }),
+      });
+      setItems((current) =>
+        current.filter((item) => item.productId._id !== productId),
+      );
+      window.dispatchEvent(new Event("cart-updated"));
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "Could not remove this product from checkout.",
+      );
+    } finally {
+      setRemovingProductId(null);
     }
   }
 
@@ -421,6 +460,19 @@ export default function CheckoutPage() {
                   <p className="text-sm font-semibold text-ink">
                     {formatRupiah(product.price)}
                   </p>
+                  <button
+                    type="button"
+                    aria-label={`Remove ${product.name} from checkout`}
+                    disabled={removingProductId !== null}
+                    onClick={() => void removeFromCheckout(product._id)}
+                    className="rounded-full p-2 text-ink-muted hover:bg-danger/10 hover:text-danger disabled:opacity-50"
+                  >
+                    {removingProductId === product._id ? (
+                      <span className="text-xs">...</span>
+                    ) : (
+                      <Trash2 size={16} />
+                    )}
+                  </button>
                 </article>
               );
             })}
@@ -606,15 +658,7 @@ export default function CheckoutPage() {
             <div className="flex justify-between text-sm font-semibold text-ink">
               <span>Pay now in money</span>
               <span>
-                {formatRupiah(
-                  Math.max(
-                    0,
-                    subtotal +
-                      (selectedShippingRate?.price ?? 0) +
-                      serviceFee -
-                      gpUsed,
-                  ),
-                )}
+                {formatRupiah(paymentAmount)}
               </span>
             </div>
           </section>
@@ -622,6 +666,18 @@ export default function CheckoutPage() {
           {!methodValid && (
             <p className="mt-3 text-xs text-warning">
               Choose a valid delivery address and courier to continue.
+            </p>
+          )}
+
+          {sellerMinimumFailed && (
+            <p role="alert" className="mt-3 text-xs text-danger">
+              {SELLER_MINIMUM_MESSAGE}
+            </p>
+          )}
+
+          {methodValid && paymentAmountInvalid && (
+            <p role="alert" className="mt-3 text-xs text-danger">
+              {QRIS_AMOUNT_MESSAGE}
             </p>
           )}
 
@@ -637,11 +693,11 @@ export default function CheckoutPage() {
           <div className="sticky bottom-0 z-10 mt-4 bg-background/95 pb-2 pt-3 backdrop-blur">
             <button
               type="button"
-              disabled={!methodValid || placingOrder}
+              disabled={!methodValid || sellerMinimumFailed || paymentAmountInvalid || placingOrder}
               onClick={completeCheckout}
               className="h-12 w-full rounded-full bg-primary text-sm font-semibold text-white shadow-primary hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {placingOrder ? "Placing order..." : "Place order"}
+              {placingOrder ? "Checking out..." : "Check out"}
             </button>
           </div>
         </>
