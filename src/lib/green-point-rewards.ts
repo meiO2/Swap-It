@@ -3,7 +3,7 @@ export const GREEN_POINT_REWARDS = {
   donationResaleQualityPerItem: 5000,
   donationUpcyclingQualityPerItem: 3000,
   donationSocialPerItem: 2000,
-  purchaseRate: 0.02,
+
 } as const;
 
 export type DonationClassificationCounts = {

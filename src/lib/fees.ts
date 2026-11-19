@@ -1,10 +1,15 @@
-export const BUYER_SERVICE_FEE_RATE = 0.025;
+import {
+  BUYER_ADMIN_FEE_BPS,
+  roundHalfUpPercent,
+} from "./financial-model.ts";
+
+export const BUYER_SERVICE_FEE_RATE = 0.03;
 export const SELLER_TRANSACTION_FEE = 5_500;
 export const SELLER_MINIMUM_MESSAGE =
   "The total for each seller must be at least Rp5.500. Add more items from that seller or remove their items.";
 
 export function calculateBuyerServiceFee(subtotal: number) {
-  return Math.round(subtotal * BUYER_SERVICE_FEE_RATE);
+  return roundHalfUpPercent(subtotal, BUYER_ADMIN_FEE_BPS);
 }
 
 export function calculateSellerFeeSnapshots(

@@ -5,6 +5,11 @@ export type PointBatch = {
   expiresAt: string;
 };
 
+import {
+  calculateTransactionFinancials,
+  splitGpPool,
+} from "@/lib/financial-model";
+
 export function createPointBatch(id: string, amount: number, earnedAt = new Date()): PointBatch {
   if (!Number.isFinite(amount) || amount < 0) {
     throw new RangeError("Point batch amount must be a non-negative number.");
@@ -56,9 +61,10 @@ export function getExpiringBatches(batches: PointBatch[], withinDays: number, no
 }
 
 export function calculatePurchaseReward(productValue: number): number {
-  if (!Number.isFinite(productValue) || productValue < 0) {
+  if (!Number.isSafeInteger(productValue) || productValue < 0) {
     throw new RangeError("Product value must be a non-negative number.");
   }
-  // TODO: Confirm how fractional GP rewards should be rounded.
-  return Math.floor(productValue * 0.02);
+  return splitGpPool(
+    calculateTransactionFinancials({ productSubtotal: productValue }).gpPool,
+  ).buyer;
 }

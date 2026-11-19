@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { unstable_rethrow } from "next/navigation";
 import mongoose from "mongoose";
 import { requireAuth } from "@/lib/authorization";
 import { connectDB } from "@/lib/mongodb";
@@ -13,11 +14,26 @@ import Cart from "@/models/Cart";
 import Order from "@/models/Order";
 import Payment from "@/models/Payment";
 import Product from "@/models/Product";
-import { awardGreenPoints, GREEN_POINT_REWARDS } from "@/lib/green-points";
+import {
+  consumeReservedGreenPoints,
+  restoreReservedGreenPoints,
+} from "@/lib/green-points";
 import { createNotificationsForMany } from "@/lib/notifications";
+import { getPaymentProvider } from "@/lib/payment-provider";
+import {
+  getPrasmulOrderDetail,
+  getPrasmulQrString,
+  parsePrasmulExpiry,
+  PrasmulExpiryError,
+} from "@/lib/prasmul";
+import { PRASMUL_CONFIRMATION_VERIFIED, verifyPrasmulStatus } from "@/lib/prasmul-status";
+import { POST as createPrasmulPayment } from "./prasmul/route";
 
 export async function POST(request: NextRequest) {
   try {
+    if (getPaymentProvider() === "PRASMUL") {
+      return await createPrasmulPayment(request);
+    }
     const auth = await requireAuth();
     if (!auth.success) return auth.response;
     await connectDB();
@@ -53,12 +69,23 @@ export async function POST(request: NextRequest) {
     }
 
     const existing = await Payment.findOne({ orderId: order._id }).lean();
+    if (existing?.provider === "PRASMUL") {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "This order already uses PRASMUL. It cannot be processed through Xendit.",
+        },
+        { status: 409 },
+      );
+    }
     if (existing?.status === "PENDING" && existing.xenditQrString) {
       return NextResponse.json({
         success: true,
         data: {
           paymentId: existing._id,
           orderId: existing.orderId,
+          provider: "XENDIT",
           status: existing.status,
           qrCodeId: existing.xenditQrCodeId,
           qrString: existing.xenditQrString,
@@ -73,6 +100,7 @@ export async function POST(request: NextRequest) {
         data: {
           paymentId: existing._id,
           orderId: existing.orderId,
+          provider: "XENDIT",
           status: existing.status,
           redirectUrl: existing.redirectUrl,
           grossAmount: existing.grossAmount,
@@ -140,12 +168,12 @@ export async function POST(request: NextRequest) {
             { upsert: true, session },
           );
           if (order.gpUsed > 0) {
-            await awardGreenPoints({
+            await restoreReservedGreenPoints({
               userId: auth.user.id,
+              orderId: order._id.toString(),
               amount: order.gpUsed,
-              type: "REFUND",
-              description: "Green Points returned after payment creation failed",
               referenceKey: `order:${order._id.toString()}:gp-refund`,
+              description: "Green Points returned after payment creation failed",
               session,
             });
           }
@@ -157,12 +185,16 @@ export async function POST(request: NextRequest) {
     }
 
     const payment = await Payment.findOneAndUpdate(
-      { orderId: order._id },
+      {
+        orderId: order._id,
+        $or: [{ provider: "XENDIT" }, { provider: { $exists: false } }],
+      },
       {
         $set: {
           userId: order.buyerId,
           // Keep the existing unique MongoDB index populated during migration.
           midtransOrderId: referenceId,
+          provider: "XENDIT",
           xenditQrCodeId: qrCode.id,
           xenditQrString: qrCode.qr_string,
           xenditReferenceId: qrCode.external_id,
@@ -175,7 +207,12 @@ export async function POST(request: NextRequest) {
           redirectUrl: 1,
         },
       },
-      { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true },
+      {
+        upsert: true,
+        new: true,
+        runValidators: true,
+        setDefaultsOnInsert: true,
+      },
     );
 
     return NextResponse.json({
@@ -183,6 +220,7 @@ export async function POST(request: NextRequest) {
       data: {
         paymentId: payment._id,
         orderId: payment.orderId,
+        provider: "XENDIT",
         status: payment.status,
         qrCodeId: payment.xenditQrCodeId,
         qrString: payment.xenditQrString,
@@ -191,6 +229,7 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
+    unstable_rethrow(error);
     console.error("Create payment error:", error);
     return NextResponse.json(
       {
@@ -227,6 +266,7 @@ export async function GET(request: NextRequest) {
     const pending = payments.find(
       (payment) =>
         payment.status === "PENDING" &&
+        payment.provider !== "PRASMUL" &&
         (payment.xenditSessionId || payment.xenditQrCodeId),
     );
     if (pending) {
@@ -303,7 +343,11 @@ export async function GET(request: NextRequest) {
                 const paidOrder = await Order.findById(pending.orderId)
                   .session(session)
                   .lean();
-                if (paidOrder) {
+                if (paidOrder?.status === "AWAITING_SELLER_HANDOVER") {
+                  await consumeReservedGreenPoints({
+                    orderId: paidOrder._id.toString(),
+                    session,
+                  });
                   await Product.updateMany(
                     {
                       _id: { $in: paidOrder.items.map((item) => item.productId) },
@@ -327,18 +371,6 @@ export async function GET(request: NextRequest) {
                     link: "/orders",
                     session,
                   });
-                  const reward = Math.floor(
-                    paidOrder.subtotal * GREEN_POINT_REWARDS.purchaseRate,
-                  );
-                  if (reward > 0) {
-                    await awardGreenPoints({
-                      userId: paidOrder.buyerId.toString(),
-                      amount: reward,
-                      description: "Completed marketplace purchase reward",
-                      referenceKey: `purchase:${paidOrder._id.toString()}`,
-                      session,
-                    });
-                  }
                 }
               } else {
                 await Order.updateOne(
@@ -369,12 +401,12 @@ export async function GET(request: NextRequest) {
                   { session },
                 );
                 if (cancelledOrder && (cancelledOrder.gpUsed ?? 0) > 0) {
-                  await awardGreenPoints({
+                  await restoreReservedGreenPoints({
                     userId: cancelledOrder.buyerId.toString(),
+                    orderId: cancelledOrder._id.toString(),
                     amount: cancelledOrder.gpUsed ?? 0,
-                    type: "REFUND",
-                    description: "Green Points returned after payment expiration",
                     referenceKey: `order:${cancelledOrder._id.toString()}:gp-refund`,
+                    description: "Green Points returned after payment expiration",
                     session,
                   });
                 }
@@ -390,14 +422,71 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    const responsePayments = [];
+    for (const payment of payments) {
+      if (payment.provider !== "PRASMUL") {
+        responsePayments.push({
+          ...payment,
+          provider: "XENDIT",
+          testMode: isXenditTestMode(),
+        });
+        continue;
+      }
+
+      const { prasmulPaymentCode, prasmulExpiredPayment, paymentData, ...safePayment } = payment;
+      void paymentData;
+      let verificationStatus: "PENDING" | "UNKNOWN" = "UNKNOWN";
+      let qrString: string | undefined;
+      let expiredPayment: Date | undefined;
+      if (payment.status === "PENDING" && payment.prasmulOrderId) {
+        try {
+          const remote = await getPrasmulOrderDetail(payment.prasmulOrderId);
+          verificationStatus = verifyPrasmulStatus(payment, remote);
+          try {
+            const remoteExpiry = parsePrasmulExpiry(remote.expired_payment, process.env.PRASMUL_TIME_ZONE);
+            if (remoteExpiry.getTime() === prasmulExpiredPayment?.getTime()) {
+              expiredPayment = remoteExpiry;
+            }
+          } catch (error) {
+            if (!(error instanceof PrasmulExpiryError)) throw error;
+            console.warn("Could not validate PRASMUL expiry.", payment._id.toString());
+          }
+          if (
+            PRASMUL_CONFIRMATION_VERIFIED &&
+            orderId &&
+            verificationStatus === "PENDING" &&
+            prasmulPaymentCode &&
+            getPrasmulQrString(remote) === prasmulPaymentCode &&
+            expiredPayment &&
+            expiredPayment.getTime() > Date.now() &&
+            await Order.exists({
+              _id: payment.orderId,
+              buyerId: auth.user.id,
+              status: "PENDING_PAYMENT",
+              expiresAt: { $gt: new Date() },
+            })
+          ) {
+            qrString = prasmulPaymentCode;
+          }
+        } catch {
+          console.error("Could not verify PRASMUL payment status.", payment._id.toString());
+        }
+      }
+      responsePayments.push({
+        ...safePayment,
+        verificationStatus,
+        qrString,
+        expiredPayment,
+        testMode: false,
+      });
+    }
+
     return NextResponse.json({
       success: true,
-      data: payments.map((payment) => ({
-        ...payment,
-        testMode: isXenditTestMode(),
-      })),
+      data: responsePayments,
     });
   } catch (error) {
+    unstable_rethrow(error);
     console.error("Get payments error:", error);
     return NextResponse.json(
       { success: false, message: "Failed to retrieve payments." },

@@ -1,9 +1,12 @@
-import { NextResponse } from "next/server";
+import { connection, NextResponse } from "next/server";
+import { connectDB } from "@/lib/mongodb";
 import { ensureMockDataSeeded } from "@/lib/mock-seed";
 import MockChatSummary from "@/models/MockChatSummary";
 
 export async function GET() {
+  await connection();
   try {
+    await connectDB();
     await ensureMockDataSeeded();
     const chats = await MockChatSummary.find({ isActive: true }).sort({ createdAt: 1 }).lean();
     return NextResponse.json({

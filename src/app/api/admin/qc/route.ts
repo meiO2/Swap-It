@@ -20,11 +20,12 @@ export async function GET() {
     // queue resilient when a legacy order has not yet had its parent status
     // migrated to QC_IN_PROGRESS.
     const orders = await Order.find({
+      status: { $nin: ["CANCELLED", "REFUNDED", "EXPIRED"] },
       $or: [
         { "items.handover.status": "RECEIVED" },
         { "items.qcStatus": "PENDING" },
-        { status: "RECEIVED", "items.qcStatus": { $nin: ["PASSED", "FAILED_AWAITING_BUYER", "BUYER_ACCEPTED", "BUYER_REJECTED", "EXPIRED"] } },
-        { status: "QC_IN_PROGRESS", "items.qcStatus": { $nin: ["PASSED", "FAILED_AWAITING_BUYER", "BUYER_ACCEPTED", "BUYER_REJECTED", "EXPIRED"] } },
+        { status: "RECEIVED", "items.qcStatus": { $nin: ["PASSED", "FAILED", "FAILED_AWAITING_BUYER", "BUYER_ACCEPTED", "BUYER_REJECTED", "EXPIRED"] } },
+        { status: "QC_IN_PROGRESS", "items.qcStatus": { $nin: ["PASSED", "FAILED", "FAILED_AWAITING_BUYER", "BUYER_ACCEPTED", "BUYER_REJECTED", "EXPIRED"] } },
       ],
     })
       .sort({ createdAt: 1 })
@@ -35,7 +36,7 @@ export async function GET() {
       order.items
         .filter(
           (item) =>
-            item.handover?.status === "RECEIVED" ||
+            (item.handover?.status === "RECEIVED" && !item.qcAssessmentId) ||
             item.qcStatus === "PENDING" ||
             ((order.status === "RECEIVED" || order.status === "QC_IN_PROGRESS") &&
               !item.qcAssessmentId &&

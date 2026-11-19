@@ -1,5 +1,6 @@
 
     import { NextResponse } from "next/server";
+    import { unstable_rethrow } from "next/navigation";
     import mongoose from "mongoose";
     import { requireAuth } from "@/lib/authorization";
     import { connectDB } from "@/lib/mongodb";
@@ -54,6 +55,7 @@
         data: handovers,
         });
     } catch (error) {
+        unstable_rethrow(error);
         console.error("Get seller handovers error:", error);
 
         return NextResponse.json(

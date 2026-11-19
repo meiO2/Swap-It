@@ -7,6 +7,8 @@ export type PaymentStatus =
   | "CANCELED"
   | "EXPIRED";
 
+export type PaymentProvider = "XENDIT" | "PRASMUL";
+
 export interface IPayment {
   orderId: mongoose.Types.ObjectId;
   userId: mongoose.Types.ObjectId;
@@ -24,7 +26,22 @@ export interface IPayment {
   redirectUrl?: string;
   paymentData?: Record<string, unknown>;
   paidAt?: Date;
+  provider?: PaymentProvider;
+  prasmulOrderId?: string;
+  prasmulQrId?: string;
+  prasmulPaymentCode?: string;
+  prasmulExpiredPayment?: Date;
+  prasmulBasicPrice?: number;
+  prasmulAmount?: number;
+
+  prasmulAdminFee?: number;
+  prasmulPpnAdminFee?: number;
+  prasmulProcessingFee?: number;
+  prasmulPpnProcessingFee?: number;
+  prasmulPlatformFee?: number;
 }
+
+ 
 
 const PaymentSchema = new Schema<IPayment>(
   {
@@ -48,10 +65,80 @@ const PaymentSchema = new Schema<IPayment>(
       unique: true,
       index: true,
     },
+    provider: {
+      type: String,
+      enum: ["XENDIT", "PRASMUL"],
+      default: "XENDIT",
+      index: true,
+    },
+
+    prasmulOrderId: {
+      type: String,
+      trim: true,
+      unique: true,
+      sparse: true,
+      index: true,
+    },
+
+    prasmulQrId: {
+      type: String,
+      trim: true,
+      unique: true,
+      sparse: true,
+      index: true,
+    },
+
+    prasmulPaymentCode: {
+      type: String,
+      trim: true,
+    },
+
+    prasmulExpiredPayment: {
+      type: Date,
+    },
+    prasmulBasicPrice: {
+      type: Number,
+      min: 0,
+    },
+
+    prasmulAmount: {
+      type: Number,
+      min: 0,
+    },
+
+    prasmulAdminFee: {
+      type: Number,
+      min: 0,
+    },
+
+    prasmulPpnAdminFee: {
+      type: Number,
+      min: 0,
+    },
+
+    prasmulProcessingFee: {
+      type: Number,
+      min: 0,
+    },
+
+    prasmulPpnProcessingFee: {
+      type: Number,
+      min: 0,
+    },
+
+    prasmulPlatformFee: {
+      type: Number,
+      min: 0,
+    },
     xenditSessionId: { type: String, unique: true, sparse: true, index: true },
     xenditQrCodeId: { type: String, unique: true, sparse: true, index: true },
     xenditQrString: { type: String },
-    xenditReferenceId: { type: String, unique: true, sparse: true, index: true },
+    xenditReferenceId: {
+      type: String,
+      unique: true,
+      sparse: true,
+      index: true,
+    },
     xenditPaymentRequestId: { type: String, trim: true },
     grossAmount: { type: Number, required: true, min: 1 },
     paymentType: { type: String, trim: true },

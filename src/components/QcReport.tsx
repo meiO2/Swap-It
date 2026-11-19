@@ -73,7 +73,7 @@ export default function QcReport({ id }: { id: string }) {
             <p className="mt-3 rounded-xl bg-warning/10 p-3 text-xs text-warning">Time remaining: <Countdown deadline={order.qcDecisionDeadline} /></p>
             <button type="button" onClick={() => { keepQcOrder(id); router.push("/orders"); }} className="mt-3 h-10 w-full rounded-full border border-border text-xs font-semibold text-ink hover:bg-mint-50">Keep product — ship with no cashback</button>
             <button type="button" onClick={() => { rejectQcOrder(id); router.push("/wallet"); }} className="mt-2 h-10 w-full rounded-full bg-danger text-xs font-semibold text-white hover:opacity-90">Reject product — refund 100% as GP</button>
-            <p className="mt-2 text-[10px] text-ink-muted">Refund: {formatGP(order.productValue)} ({formatRupiah(order.productValue)}) to your wallet. Shipping and service fees are handled separately.</p>
+            <p className="mt-2 text-[10px] text-ink-muted">Refund: {formatGP(order.productValue)} ({formatRupiah(order.productValue)}) as Green Points. Shipping and service fees are not included.</p>
           </>
         ) : (
           <p className="mt-2 text-xs text-ink-muted">{expired ? "The decision window ended. The product will ship with no cashback." : "This QC decision has already been recorded."}</p>

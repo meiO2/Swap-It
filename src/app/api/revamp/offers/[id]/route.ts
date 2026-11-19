@@ -17,8 +17,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     if (offer.expiresAt <= new Date()) { offer.status = "EXPIRED"; offer.decidedAt = new Date(); await offer.save(); await Product.updateOne({ _id: offer.productId, status: "REVAMP_ELIGIBLE" }, { $set: { status: "AVAILABLE" } }); return NextResponse.json({ success: false, message: "This offer has expired." }, { status: 409 }); }
     const accepted = body.decision === "ACCEPT"; offer.status = accepted ? "ACCEPTED" : "REJECTED"; offer.decidedAt = new Date(); await offer.save();
     await Product.updateOne({ _id: offer.productId, sellerId: auth.user.id, status: "REVAMP_ELIGIBLE" }, { $set: { status: accepted ? "REVAMPED" : "AVAILABLE" } });
-    if (accepted) await awardGreenPoints({ userId: auth.user.id, amount: offer.offerAmount, description: "80% Revamp offer accepted", referenceKey: `revamp-offer:${offer._id}:compensation` });
-    await createNotification({ recipientId: auth.user.id, type: "REVAMP_UPDATE", title: accepted ? "Revamp offer accepted" : "Revamp offer declined", message: accepted ? `${offer.offerAmount.toLocaleString("id-ID")} GP has been added to your wallet.` : "Your listing is available in the marketplace again.", link: accepted ? "/wallet" : "/listings" });
+    const credit = accepted ? await awardGreenPoints({ userId: auth.user.id, amount: offer.offerAmount, description: "80% Revamp offer accepted", referenceKey: `revamp-offer:${offer._id}:compensation`, source: "OTHER" }) : null;
+    const creditPending = credit && "status" in credit && credit.status === "PENDING_REWARD";
+    await createNotification({ recipientId: auth.user.id, type: "REVAMP_UPDATE", title: accepted ? "Revamp offer accepted" : "Revamp offer declined", message: accepted ? creditPending ? `${offer.offerAmount.toLocaleString("id-ID")} GP is pending reserve funding and is not spendable yet.` : `${offer.offerAmount.toLocaleString("id-ID")} GP has been added to your wallet.` : "Your listing is available in the marketplace again.", link: accepted ? "/wallet" : "/listings" });
     return NextResponse.json({ success: true, data: offer });
   } catch (error) { console.error("Decide Revamp offer error:", error); return NextResponse.json({ success: false, message: "Could not update Revamp offer." }, { status: 500 }); }
 }

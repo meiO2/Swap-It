@@ -4,6 +4,16 @@ import {
   calculateBuyerServiceFee,
   calculateSellerFeeSnapshots,
 } from "../src/lib/fees.ts";
+import {
+  allocateSellerGp,
+  calculateMaximumGpRedemption,
+  calculateTransactionFinancials,
+  splitGpPool,
+} from "../src/lib/financial-model.ts";
+import {
+  calculateSellerRecoveryAmount,
+  calculateSellerSettlement,
+} from "../src/lib/seller-settlement-calculations.ts";
 import { formatGP, formatPrice, parseListingPrice } from "../src/lib/format.ts";
 
 test("listing prices preserve whole rupiah and reject ambiguous input", () => {
@@ -23,12 +33,12 @@ test("listing prices preserve whole rupiah and reject ambiguous input", () => {
   assert.equal(formatGP(50_000), "50.000 GP");
 });
 
-test("buyer fee is 2.5 percent without the old minimum or maximum", () => {
+test("buyer administration fee is 3 percent rounded half up", () => {
   assert.equal(calculateBuyerServiceFee(0), 0);
-  assert.equal(calculateBuyerServiceFee(50_000), 1_250);
-  assert.equal(calculateBuyerServiceFee(80_000), 2_000);
-  assert.equal(calculateBuyerServiceFee(1_000_000), 25_000);
-  assert.equal(calculateBuyerServiceFee(5_501), 138);
+  assert.equal(calculateBuyerServiceFee(50_000), 1_500);
+  assert.equal(calculateBuyerServiceFee(80_000), 2_400);
+  assert.equal(calculateBuyerServiceFee(1_000_000), 30_000);
+  assert.equal(calculateBuyerServiceFee(5_501), 165);
 });
 
 test("seller fees are recorded once per seller per order", () => {
@@ -43,4 +53,114 @@ test("seller fees are recorded once per seller per order", () => {
     { sellerId: "b", subtotal: 80_000, transactionFee: 5_500, netAmount: 74_500 },
     { sellerId: "c", subtotal: 5_499, transactionFee: 5_500, netAmount: -1 },
   ]);
+});
+
+test("transaction financial model matches the full-cash and 30-percent GP examples", () => {
+  const fullCash = calculateTransactionFinancials({
+    productSubtotal: 100_000,
+    cashProcessed: 103_000,
+  });
+  assert.deepEqual(fullCash, {
+    buyerAdminFee: 3_000,
+    gatewayBudget: 700,
+    nominalSwapItRevenue: 1_500,
+    swapItRevenueTarget: 1_500,
+    roundingAdjustment: 0,
+    gpPool: 800,
+    actualGatewayFee: 721,
+    gatewayBuffer: 0,
+    gatewayShortfall: 21,
+    retainedSwapItRevenue: 1_479,
+  });
+
+  const partialGp = calculateTransactionFinancials({
+    productSubtotal: 100_000,
+    cashProcessed: 73_000,
+  });
+  assert.equal(partialGp.actualGatewayFee, 511);
+  assert.equal(partialGp.gatewayBuffer, 189);
+  assert.equal(partialGp.retainedSwapItRevenue, 1_500);
+  assert.equal(calculateMaximumGpRedemption(100_000), 30_000);
+});
+
+test("GP splits and largest-remainder seller allocation preserve the full pool", () => {
+  const split = splitGpPool(801);
+  assert.deepEqual(split, { buyer: 480, seller: 321 });
+  const sellerShares = allocateSellerGp(split.seller, [
+    { sellerId: "seller-b", subtotal: 40_000 },
+    { sellerId: "seller-a", subtotal: 60_000 },
+  ]);
+  assert.deepEqual(sellerShares, [
+    { sellerId: "seller-a", amount: 193 },
+    { sellerId: "seller-b", amount: 128 },
+  ]);
+  assert.equal(sellerShares.reduce((sum, item) => sum + item.amount, 0), split.seller);
+});
+
+test("seller settlement tracks outstanding payable and returned overpayment separately", () => {
+  assert.deepEqual(
+    calculateSellerSettlement({
+      payableAmount: 100,
+      totalPaid: 60,
+      overpaymentReturned: 0,
+    }),
+    {
+      outstandingPayable: 40,
+      overpaymentAmount: 0,
+      outstandingOverpayment: 0,
+      status: "PARTIALLY_SETTLED",
+    },
+  );
+  assert.deepEqual(
+    calculateSellerSettlement({
+      payableAmount: 100,
+      totalPaid: 120,
+      overpaymentReturned: 8,
+    }),
+    {
+      outstandingPayable: 0,
+      overpaymentAmount: 20,
+      outstandingOverpayment: 12,
+      status: "OVERPAID",
+    },
+  );
+  assert.equal(
+    calculateSellerSettlement({
+      payableAmount: 100,
+      totalPaid: 120,
+      overpaymentReturned: 20,
+    }).status,
+    "SETTLED",
+  );
+  assert.equal(
+    calculateSellerRecoveryAmount({
+      totalPaid: 120,
+      overpaymentReturned: 20,
+    }),
+    100,
+  );
+  assert.equal(
+    calculateSellerRecoveryAmount({
+      totalPaid: 60,
+      overpaymentReturned: 0,
+    }),
+    60,
+  );
+  assert.equal(
+    calculateSellerSettlement({
+      payableAmount: 0,
+      totalPaid: 0,
+      overpaymentReturned: 0,
+    }).status,
+    "SETTLED",
+  );
+  assert.throws(
+    () =>
+      calculateSellerSettlement({
+        payableAmount: 100,
+        totalPaid: 120,
+        overpaymentReturned: 21,
+      }),
+    /exceeds the actual overpayment/,
+  );
 });

@@ -61,7 +61,27 @@ export type OrderShape = {
     subtotal: number;
     transactionFee: number;
     netAmount: number;
+    gpReward?: number;
   };
+  sellerSettlement?: {
+    sellerSubtotal: number;
+    transactionFee: number;
+    payableAmount: number;
+    totalPaid: number;
+    overpaymentReturned: number;
+    outstandingPayable: number;
+    overpaymentAmount: number;
+    outstandingOverpayment: number;
+    status:
+      | "PENDING"
+      | "PARTIALLY_SETTLED"
+      | "OVERPAID"
+      | "SETTLED"
+      | "CANCELLED";
+    settledAmount?: number;
+    settledAt?: string;
+  } | null;
+  isBuyer?: boolean;
   gpUsed: number;
   moneyPaid: number;
   status: OrderStatus;
@@ -78,6 +98,11 @@ export type OrderShape = {
   sellerRetrievalDeadline?: string;
   sellerOutcome?: "Pending" | "Retrieved" | "Revamp";
   rewardEligible?: boolean;
+  shipmentEvents?: Array<{
+    status: "SHIPPED" | "DELIVERED";
+    recordedAt: string;
+    reference?: string;
+  }>;
 };
 
 export type CheckoutOrderInput = {

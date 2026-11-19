@@ -7,17 +7,28 @@ import { apiRequest } from "@/lib/api";
 import { formatRupiah } from "@/lib/format";
 
 type PaymentStatus = "PENDING" | "PAID" | "FAILED" | "CANCELED" | "EXPIRED";
+
+type PaymentProvider = "XENDIT" | "PRASMUL";
+
 type Payment = {
   _id: string;
   orderId: string;
+  provider?: PaymentProvider;
   grossAmount: number;
   status: PaymentStatus;
   createdAt: string;
+  verificationStatus?: "PENDING" | "UNKNOWN";
 };
 
 function StatusIcon({ status }: { status: PaymentStatus }) {
-  if (status === "PAID") return <CheckCircle2 className="text-success" size={20} />;
-  if (status === "PENDING") return <Clock3 className="text-warning" size={20} />;
+  if (status === "PAID") {
+    return <CheckCircle2 className="text-success" size={20} />;
+  }
+
+  if (status === "PENDING") {
+    return <Clock3 className="text-warning" size={20} />;
+  }
+
   return <XCircle className="text-danger" size={20} />;
 }
 
@@ -27,14 +38,26 @@ export default function PaymentsPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
+    let active = true;
+
     apiRequest<Payment[]>("/api/payments")
-      .then(setPayments)
-      .catch((cause: unknown) =>
+      .then((data) => {
+        if (active) setPayments(data);
+      })
+      .catch((cause: unknown) => {
+        if (!active) return;
+
         setError(
           cause instanceof Error ? cause.message : "Could not load payments.",
-        ),
-      )
-      .finally(() => setLoading(false));
+        );
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   return (
@@ -47,19 +70,27 @@ export default function PaymentsPage() {
         >
           <ArrowLeft size={20} />
         </Link>
+
         <div>
           <h1 className="text-xl font-semibold text-ink">Payment history</h1>
-          <p className="text-xs text-ink-muted">Your Xendit transactions</p>
+          <p className="text-xs text-ink-muted">Your payment transactions</p>
         </div>
       </header>
 
       {error && (
-        <p role="alert" className="mb-3 rounded-xl bg-danger/10 p-3 text-xs text-danger">
+        <p
+          role="alert"
+          className="mb-3 rounded-xl bg-danger/10 p-3 text-xs text-danger"
+        >
           {error}
         </p>
       )}
+
       {loading ? (
-        <p role="status" className="rounded-2xl bg-white p-5 text-sm text-ink-muted">
+        <p
+          role="status"
+          className="rounded-2xl bg-white p-5 text-sm text-ink-muted"
+        >
           Loading payments…
         </p>
       ) : payments.length === 0 ? (
@@ -74,15 +105,32 @@ export default function PaymentsPage() {
               href={`/payment/result?orderId=${encodeURIComponent(payment.orderId)}`}
               className="flex items-center gap-3 rounded-2xl bg-white p-4 shadow-card"
             >
-              <StatusIcon status={payment.status} />
+              <StatusIcon status={payment.provider === "PRASMUL" && payment.verificationStatus === "UNKNOWN" ? "PENDING" : payment.status} />
+
               <span className="min-w-0 flex-1">
                 <span className="block text-sm font-semibold text-ink">
-                  {payment.status}
+                  {payment.provider === "PRASMUL" && payment.verificationStatus === "UNKNOWN"
+                    ? "Awaiting verification"
+                    : payment.status}
                 </span>
+
                 <span className="mt-1 block truncate text-xs text-ink-muted">
                   Order {payment.orderId}
                 </span>
+
+                <span className="mt-1 block text-xs text-ink-muted">
+                  {payment.provider ?? "Payment provider"}
+                </span>
+
+                <span className="mt-1 block text-xs text-ink-muted">
+                  {new Date(payment.createdAt).toLocaleDateString("id-ID", {
+                    day: "numeric",
+                    month: "short",
+                    year: "numeric",
+                  })}
+                </span>
               </span>
+
               <span className="text-sm font-semibold text-primary">
                 {formatRupiah(payment.grossAmount)}
               </span>

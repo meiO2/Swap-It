@@ -29,6 +29,7 @@ function OrderDetailsContent() {
   const [error, setError] = useState("");
   const [cancelling, setCancelling] = useState(false);
   const [qcSaving, setQcSaving] = useState(false);
+  const [confirmingReceipt, setConfirmingReceipt] = useState(false);
   const product = useMemo(() => order?.items[0] ? catalogProducts.find((item) => item.id === order.items[0].productId) : undefined, [order]);
   const latestEvent = order?.trackingEvents?.slice().sort((a, b) => Date.parse(b.at) - Date.parse(a.at))[0];
   useEffect(() => {
@@ -77,6 +78,22 @@ function OrderDetailsContent() {
     try { setQcSaving(true); setError(""); await apiRequest<{ qcStatus: string; refundAmount: number }>(`/api/orders/${encodeURIComponent(order.id)}/qc-decision`, { method: "POST", body: JSON.stringify({ productId, decision }) }); setNotice(decision === "REJECT" ? "Refund initiated. The full product value will be returned as Green Points." : "Your choice was recorded. The product will continue to shipping."); await apiRequest<OrderShape>(`/api/orders/${encodeURIComponent(id)}`).then(setOrder); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not save your decision."); } finally { setQcSaving(false); }
   }
 
+  async function confirmReceipt() {
+    if (!order || confirmingReceipt) return;
+    if (!window.confirm("Confirm that you received the order? This completes the order and issues eligible Green Point rewards.")) return;
+    try {
+      setConfirmingReceipt(true);
+      setError("");
+      await apiRequest(`/api/orders/${encodeURIComponent(order.id)}/confirm-received`, { method: "POST" });
+      setNotice("Receipt confirmed. Eligible rewards were issued or queued for reserve funding.");
+      setOrder(await apiRequest<OrderShape>(`/api/orders/${encodeURIComponent(order.id)}`));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not confirm receipt.");
+    } finally {
+      setConfirmingReceipt(false);
+    }
+  }
+
   if (!ready) return <main className="min-h-dvh px-4 py-8 text-center text-sm text-ink-muted">Loading order…</main>;
   if (!order) return <main className="min-h-dvh px-4 py-8"><h1 className="text-xl font-semibold text-ink">Order not found</h1><p className="mt-2 text-sm text-ink-muted">This order may have been removed or the link may be incorrect.</p><Link href="/orders" className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-full bg-primary px-5 text-sm font-semibold text-white"><ArrowLeft size={16} /> Back to orders</Link></main>;
   const viewOrder = order;
@@ -93,7 +110,9 @@ function OrderDetailsContent() {
   const routeDates = delivery?.courier ? formatOrderDate(viewOrder.estimatedArrival ?? addDays(new Date(viewOrder.createdAt), delivery.courier.maxDays).toISOString()) : null;
   const detailsTitle = product ? `${product.name} × ${viewOrder.items[0]?.quantity ?? 1}` : `${viewOrder.items.length} item${viewOrder.items.length === 1 ? "" : "s"}`;
   const flaggedItems = viewOrder.items.filter(
-    (item) => item.qcStatus === "FAILED_AWAITING_BUYER",
+    (item) =>
+      item.qcStatus === "FAILED" ||
+      item.qcStatus === "FAILED_AWAITING_BUYER",
   );
 
   return (
@@ -117,6 +136,15 @@ function OrderDetailsContent() {
           </button>
         </section>
       )}
+      {viewOrder.status === "DELIVERED" && viewOrder.isBuyer && (
+        <section className="rounded-3xl border border-primary/20 bg-mint-50 p-4">
+          <h2 className="text-sm font-bold text-ink">Confirm receipt</h2>
+          <p className="mt-1 text-xs leading-relaxed text-ink-muted">Confirm only after you have received the order. The order will then be completed and eligible GP rewards will be issued or queued.</p>
+          <button type="button" disabled={confirmingReceipt} onClick={() => void confirmReceipt()} className="mt-3 min-h-11 w-full rounded-full bg-primary px-4 text-xs font-semibold text-white disabled:opacity-60">
+            {confirmingReceipt ? "Confirming…" : "Confirm received"}
+          </button>
+        </section>
+      )}
 
       <section className="rounded-3xl bg-white p-4 shadow-card">
         <div className="flex items-start justify-between gap-2">
@@ -130,8 +158,8 @@ function OrderDetailsContent() {
 
       {flaggedItems.length > 0 && (
         <section className="rounded-3xl border border-danger/20 bg-danger/5 p-4">
-          <h2 className="flex items-center gap-2 text-sm font-bold text-danger"><BadgeCheck size={18} /> Action needed</h2>
-          <p className="mt-2 text-xs leading-relaxed text-ink">QC menemukan catatan pada barang ini. Tinjau detail dan foto bukti, lalu pilih apakah ingin tetap menerima atau menolak barang.</p>
+          <h2 className="flex items-center gap-2 text-sm font-bold text-danger"><BadgeCheck size={18} /> QC update</h2>
+          <p className="mt-2 text-xs leading-relaxed text-ink">{flaggedItems.some((item) => item.qcStatus === "FAILED") ? "QC gagal, sehingga seluruh order dibatalkan. Nilai produk dikembalikan sebagai Green Points; kredit mungkin menunggu pendanaan reserve." : "QC menemukan catatan pada barang ini. Tinjau detail dan foto bukti."}</p>
           {flaggedItems.map((item) => (
             <div key={item.productId} className="mt-4 rounded-2xl bg-white p-3">
               {item.qcAssessment?.notes && <p className="text-sm text-ink">{item.qcAssessment.notes}</p>}
@@ -142,11 +170,15 @@ function OrderDetailsContent() {
                   </a>
                 ))}
               </div>
-              {item.qcDecisionDeadline && <p className="mt-3 rounded-xl bg-warning/10 p-3 text-xs font-medium text-warning">Batas pilihan: <Countdown deadline={item.qcDecisionDeadline} /></p>}
-              <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                <button key={`${item.productId}-accept`} disabled={qcSaving} onClick={() => void decideQc(item.productId, "ACCEPT")} className="min-h-11 rounded-full border border-primary/40 text-xs font-semibold text-primary disabled:opacity-60">Terima barang</button>
-                <button key={`${item.productId}-reject`} disabled={qcSaving} onClick={() => void decideQc(item.productId, "REJECT")} className="min-h-11 rounded-full bg-danger text-xs font-semibold text-white disabled:opacity-60">Tolak &amp; minta refund</button>
-              </div>
+              {item.qcStatus === "FAILED_AWAITING_BUYER" && (
+                <>
+                  {item.qcDecisionDeadline && <p className="mt-3 rounded-xl bg-warning/10 p-3 text-xs font-medium text-warning">Batas pilihan: <Countdown deadline={item.qcDecisionDeadline} /></p>}
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    <button key={`${item.productId}-accept`} disabled={qcSaving} onClick={() => void decideQc(item.productId, "ACCEPT")} className="min-h-11 rounded-full border border-primary/40 text-xs font-semibold text-primary disabled:opacity-60">Terima barang</button>
+                    <button key={`${item.productId}-reject`} disabled={qcSaving} onClick={() => void decideQc(item.productId, "REJECT")} className="min-h-11 rounded-full bg-danger text-xs font-semibold text-white disabled:opacity-60">Tolak &amp; minta refund</button>
+                  </div>
+                </>
+              )}
             </div>
           ))}
         </section>
@@ -187,7 +219,17 @@ function OrderDetailsContent() {
           <SummaryRow label="Your product value" value={formatRupiah(viewOrder.sellerFeeSnapshot.subtotal)} />
           <SummaryRow label="Transaction fee" value={`−${formatRupiah(viewOrder.sellerFeeSnapshot.transactionFee)}`} />
           <SummaryRow label="Estimated net" value={formatRupiah(viewOrder.sellerFeeSnapshot.netAmount)} strong />
-          <p className="mt-2 text-xs text-ink-muted">Recorded at checkout only. Refunds or cancelled items may change the final amount. Seller balances and payouts are not yet available.</p>
+          {viewOrder.sellerFeeSnapshot.gpReward !== undefined && <SummaryRow label="GP reward after completion" value={formatGP(viewOrder.sellerFeeSnapshot.gpReward)} positive />}
+          {viewOrder.sellerSettlement ? (
+            <p className="mt-2 text-xs text-ink-muted">
+              Seller payable: {viewOrder.sellerSettlement.status}
+              {` · paid ${formatRupiah(viewOrder.sellerSettlement.totalPaid)}`}
+              {viewOrder.sellerSettlement.outstandingPayable > 0 ? ` · outstanding ${formatRupiah(viewOrder.sellerSettlement.outstandingPayable)}` : ""}
+              {viewOrder.sellerSettlement.outstandingOverpayment > 0 ? ` · overpayment return outstanding ${formatRupiah(viewOrder.sellerSettlement.outstandingOverpayment)}` : ""}
+            </p>
+          ) : (
+            <p className="mt-2 text-xs text-ink-muted">Payable is created as PENDING after buyer confirmation and settled manually by an admin.</p>
+          )}
         </section>
       )}
 

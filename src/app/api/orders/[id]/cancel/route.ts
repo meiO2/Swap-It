@@ -4,7 +4,8 @@ import { requireAuth } from "@/lib/authorization";
 import { connectDB } from "@/lib/mongodb";
 import Order from "@/models/Order";
 import Product from "@/models/Product";
-import { awardGreenPoints } from "@/lib/green-points";
+import Payment from "@/models/Payment";
+import { restoreReservedGreenPoints } from "@/lib/green-points";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -35,6 +36,14 @@ export async function POST(
       }).session(session);
       if (!order) throw new Error("Only pending payment orders can be cancelled.");
 
+      const prasmulPayment = await Payment.exists({
+        orderId: order._id,
+        provider: "PRASMUL",
+      }).session(session);
+      if (prasmulPayment) {
+        throw new Error("PRASMUL payment requires manual reconciliation before cancellation.");
+      }
+
       await Order.updateOne(
         { _id: id, status: "PENDING_PAYMENT" },
         { $set: { status: "CANCELLED" } },
@@ -46,12 +55,12 @@ export async function POST(
         { session },
       );
       if (order.gpUsed > 0) {
-        await awardGreenPoints({
+        await restoreReservedGreenPoints({
           userId: auth.user.id,
+          orderId: order._id.toString(),
           amount: order.gpUsed,
-          type: "REFUND",
-          description: "Green Points returned after order cancellation",
           referenceKey: `order:${order._id.toString()}:gp-refund`,
+          description: "Green Points returned after order cancellation",
           session,
         });
       }
@@ -70,11 +79,13 @@ export async function POST(
       {
         success: false,
         message:
-          message === "Only pending payment orders can be cancelled."
+          message === "Only pending payment orders can be cancelled." ||
+          message === "PRASMUL payment requires manual reconciliation before cancellation."
             ? message
             : "Failed to cancel order.",
       },
-      { status: message === "Only pending payment orders can be cancelled." ? 409 : 500 },
+      { status: message === "Only pending payment orders can be cancelled." ||
+        message === "PRASMUL payment requires manual reconciliation before cancellation." ? 409 : 500 },
     );
   } finally {
     await session.endSession();

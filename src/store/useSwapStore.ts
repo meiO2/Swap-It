@@ -3,6 +3,7 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { calculatePurchaseReward, createPointBatch, getAvailablePointBalance, spendPointsFEFOAt, type PointBatch } from "@/lib/gp";
+import { calculateMaximumGpRedemption } from "@/lib/financial-model";
 import { getExpiryDate } from "@/lib/hub";
 import {
   buildTimeline,
@@ -93,8 +94,8 @@ export const useSwapStore = create<SwapStore>()(
         const current = get();
         const now = new Date();
         const totalPoints = getAvailablePointBalance(current.pointBatches, now);
-        if (input.gpUsed < 0 || input.gpUsed > input.productValue || input.gpUsed > totalPoints) {
-          throw new RangeError("Green Points must be within the product value and available wallet balance.");
+        if (input.gpUsed < 0 || input.gpUsed > calculateMaximumGpRedemption(input.productValue) || input.gpUsed > totalPoints) {
+          throw new RangeError("Green Points must be within the 30% product-value cap and available wallet balance.");
         }
         const orderId = generateOrderId(current.orders.map((order) => order.id));
         const createdAt = now.toISOString();
@@ -143,7 +144,7 @@ export const useSwapStore = create<SwapStore>()(
           orders: state.orders.map((order) => order.id === id ? { ...order, status, rewardGranted: true, progress: 1 } : order),
           pointBatches: reward > 0 && earnsReward ? [...state.pointBatches, batch] : state.pointBatches,
           transactions: reward > 0 && earnsReward
-            ? [{ id: `tx-${id}`, kind: "earned", amount: reward, label: "2% completed order reward", createdAt: earnedAt.toISOString() }, ...state.transactions]
+            ? [{ id: `tx-${id}`, kind: "earned", amount: reward, label: "Completed order GP reward", createdAt: earnedAt.toISOString() }, ...state.transactions]
             : state.transactions,
           notifications: reward > 0 && earnsReward ? [{
             id: `notification-order-${id}`,

@@ -13,7 +13,16 @@ import Order, {
 import Product from "@/models/Product";
 import { getBiteshipCourierCode } from "@/lib/biteship";
 import { getShippingRates, ShippingRequestError } from "@/lib/shipping";
-import { getGreenPointBalance, redeemGreenPoints } from "@/lib/green-points";
+import {
+  getGreenPointBalance,
+  redeemGreenPoints,
+} from "@/lib/green-points";
+import {
+  allocateSellerGp,
+  calculateMaximumGpRedemption,
+  calculateTransactionFinancials,
+  splitGpPool,
+} from "@/lib/financial-model";
 import {
   calculateBuyerServiceFee,
   calculateSellerFeeSnapshots,
@@ -52,6 +61,7 @@ export async function GET() {
     const serializedOrders = orders.map((order) => ({
       ...order,
       sellerFeeSnapshots: undefined,
+      financialSnapshot: undefined,
       id: order._id.toString(),
       items: order.items.map((item) => ({
         ...item,
@@ -242,13 +252,13 @@ export async function POST(request: NextRequest) {
           0,
         );
 
-        const sellerFeeSnapshots = calculateSellerFeeSnapshots(
+        const baseSellerFeeSnapshots = calculateSellerFeeSnapshots(
           items.map((item) => ({
             sellerId: item.sellerId.toString(),
             price: item.price,
           })),
         );
-        if (sellerFeeSnapshots.some((snapshot) => snapshot.netAmount < 0)) {
+        if (baseSellerFeeSnapshots.some((snapshot) => snapshot.netAmount < 0)) {
           throw new Error(SELLER_MINIMUM_MESSAGE);
         }
 
@@ -259,7 +269,14 @@ export async function POST(request: NextRequest) {
           new Date(),
           session,
         );
-        const gpUsed = Math.min(requestedGp, subtotal);
+        const maximumGpRedemption =
+          calculateMaximumGpRedemption(subtotal);
+        if (requestedGp > maximumGpRedemption) {
+          throw new Error(
+            `Green Point redemption cannot exceed ${maximumGpRedemption} GP for this product subtotal.`,
+          );
+        }
+        const gpUsed = requestedGp;
         if (gpUsed > availableGp) {
           throw new Error(
             `Insufficient Green Points: ${availableGp} GP available.`,
@@ -267,6 +284,36 @@ export async function POST(request: NextRequest) {
         }
         const totalAmount =
           subtotal + shippingFee + serviceFee - gpUsed;
+        const financial = calculateTransactionFinancials({
+          productSubtotal: subtotal,
+          cashProcessed: totalAmount,
+        });
+        if (
+          financial.actualGatewayFee === undefined ||
+          financial.gatewayBuffer === undefined ||
+          financial.gatewayShortfall === undefined ||
+          financial.retainedSwapItRevenue === undefined
+        ) {
+          throw new Error("Transaction financial snapshot is incomplete.");
+        }
+        const gpAllocation = splitGpPool(financial.gpPool);
+        const sellerGpAllocation = allocateSellerGp(
+          gpAllocation.seller,
+          baseSellerFeeSnapshots.map((snapshot) => ({
+            sellerId: snapshot.sellerId,
+            subtotal: snapshot.subtotal,
+          })),
+        );
+        const sellerRewards = new Map(
+          sellerGpAllocation.map((allocation) => [
+            allocation.sellerId,
+            allocation.amount,
+          ]),
+        );
+        const sellerFeeSnapshots = baseSellerFeeSnapshots.map((snapshot) => ({
+          ...snapshot,
+          gpReward: sellerRewards.get(snapshot.sellerId) ?? 0,
+        }));
         if (totalAmount < QRIS_MIN_AMOUNT || totalAmount > QRIS_MAX_AMOUNT) {
           throw new Error(QRIS_AMOUNT_MESSAGE);
         }
@@ -285,6 +332,21 @@ export async function POST(request: NextRequest) {
             ...snapshot,
             sellerId: new mongoose.Types.ObjectId(snapshot.sellerId),
           })),
+          financialSnapshot: {
+            buyerAdminFee: financial.buyerAdminFee,
+            gatewayBudget: financial.gatewayBudget,
+            nominalSwapItRevenue: financial.nominalSwapItRevenue,
+            swapItRevenueTarget: financial.swapItRevenueTarget,
+            roundingAdjustment: financial.roundingAdjustment,
+            gpPool: financial.gpPool,
+            buyerGpReward: gpAllocation.buyer,
+            sellerGpReward: gpAllocation.seller,
+            cashProcessed: totalAmount,
+            actualGatewayFee: financial.actualGatewayFee,
+            gatewayBuffer: financial.gatewayBuffer,
+            gatewayShortfall: financial.gatewayShortfall,
+            retainedSwapItRevenue: financial.retainedSwapItRevenue,
+          },
           gpUsed,
           totalAmount,
           deliveryMethod: body.deliveryMethod,
@@ -325,6 +387,7 @@ export async function POST(request: NextRequest) {
 
         await redeemGreenPoints({
           userId: auth.user.id,
+          orderId: createdOrder._id.toString(),
           amount: gpUsed,
           referenceKey: `order:${createdOrder._id.toString()}`,
           session,
@@ -384,6 +447,12 @@ export async function POST(request: NextRequest) {
       QRIS_AMOUNT_MESSAGE,
     ].includes(message)
       ? 409
+      : message.startsWith("Green Point redemption cannot exceed ")
+        ? 400
+      : message.startsWith("Green Point redemption is temporarily unavailable")
+        ? 409
+      : message.startsWith("Insufficient Green Points")
+        ? 409
       : error instanceof ShippingRequestError
         ? 400
       : 500;

@@ -109,6 +109,7 @@
             amount: 2000,
             description: "Account registration reward",
             referenceKey: `registration:${user._id.toString()}`,
+            source: "REGISTRATION",
         });
 
         // Remove temporary registration data.

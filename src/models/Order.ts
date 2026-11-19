@@ -55,6 +55,7 @@ export type ItemQCStatus =
   | "NOT_STARTED"
   | "PENDING"
   | "PASSED"
+  | "FAILED"
   | "FAILED_AWAITING_BUYER"
   | "BUYER_ACCEPTED"
   | "BUYER_REJECTED"
@@ -127,7 +128,23 @@ export interface IOrder {
     subtotal: number;
     transactionFee: number;
     netAmount: number;
+    gpReward?: number;
   }>;
+  financialSnapshot?: {
+    buyerAdminFee: number;
+    gatewayBudget: number;
+    nominalSwapItRevenue: number;
+    swapItRevenueTarget: number;
+    roundingAdjustment: number;
+    gpPool: number;
+    buyerGpReward: number;
+    sellerGpReward: number;
+    cashProcessed: number;
+    actualGatewayFee: number;
+    gatewayBuffer: number;
+    gatewayShortfall: number;
+    retainedSwapItRevenue: number;
+  };
   gpUsed: number;
   totalAmount: number;
   deliveryMethod: DeliveryMethod;
@@ -141,6 +158,14 @@ export interface IOrder {
   shippingAddress?: IOrderAddress;
   pickupHub?: IPickupHub;
   status: OrderStatus;
+  shipmentEvents?: Array<{
+    status: "SHIPPED" | "DELIVERED";
+    recordedBy: mongoose.Types.ObjectId;
+    recordedAt: Date;
+    reference?: string;
+    note?: string;
+  }>;
+  completedAt?: Date;
   expiresAt: Date;
 
   createdAt?: Date;
@@ -250,6 +275,7 @@ const OrderItemSchema = new Schema<IOrderItem>(
         "NOT_STARTED",
         "PENDING",
         "PASSED",
+        "FAILED",
         "FAILED_AWAITING_BUYER",
         "BUYER_ACCEPTED",
         "BUYER_REJECTED",
@@ -316,9 +342,25 @@ const OrderSchema = new Schema<IOrder>(
         subtotal: { type: Number, required: true, min: 0 },
         transactionFee: { type: Number, required: true, min: 0 },
         netAmount: { type: Number, required: true, min: 0 },
+        gpReward: { type: Number, min: 0 },
         _id: false,
       }],
       default: undefined,
+    },
+    financialSnapshot: {
+      buyerAdminFee: { type: Number, min: 0 },
+      gatewayBudget: { type: Number, min: 0 },
+      nominalSwapItRevenue: { type: Number, min: 0 },
+      swapItRevenueTarget: { type: Number, min: 0 },
+      roundingAdjustment: { type: Number },
+      gpPool: { type: Number, min: 0 },
+      buyerGpReward: { type: Number, min: 0 },
+      sellerGpReward: { type: Number, min: 0 },
+      cashProcessed: { type: Number, min: 0 },
+      actualGatewayFee: { type: Number, min: 0 },
+      gatewayBuffer: { type: Number, min: 0 },
+      gatewayShortfall: { type: Number, min: 0 },
+      retainedSwapItRevenue: { type: Number },
     },
     gpUsed: { type: Number, required: true, min: 0, default: 0 },
     totalAmount: { type: Number, required: true, min: 1 },
@@ -366,6 +408,18 @@ const OrderSchema = new Schema<IOrder>(
       default: "PENDING_PAYMENT",
       index: true,
     },
+    shipmentEvents: {
+      type: [{
+        status: { type: String, enum: ["SHIPPED", "DELIVERED"], required: true },
+        recordedBy: { type: Schema.Types.ObjectId, ref: "User", required: true },
+        recordedAt: { type: Date, required: true },
+        reference: { type: String, trim: true, maxlength: 200 },
+        note: { type: String, trim: true, maxlength: 1000 },
+        _id: false,
+      }],
+      default: [],
+    },
+    completedAt: Date,
     expiresAt: { type: Date, required: true, index: true },
   },
   { timestamps: true },

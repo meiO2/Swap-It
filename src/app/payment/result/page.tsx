@@ -1,3 +1,4 @@
+
 "use client";
 
 import Link from "next/link";
@@ -7,15 +8,18 @@ import { ArrowLeft, CheckCircle2, Clock3, XCircle } from "lucide-react";
 import { formatRupiah } from "@/lib/format";
 import { apiRequest } from "@/lib/api";
 
+type PaymentProvider = "XENDIT" | "PRASMUL";
 type PaymentStatus = "PENDING" | "PAID" | "FAILED" | "CANCELED" | "EXPIRED";
 
 type Payment = {
   _id: string;
   orderId: string;
+  provider?: PaymentProvider;
   grossAmount: number;
   status: PaymentStatus;
   createdAt: string;
   paidAt?: string;
+  verificationStatus?: "PENDING" | "UNKNOWN";
 };
 
 const statusCopy: Record<
@@ -24,7 +28,7 @@ const statusCopy: Record<
 > = {
   PENDING: {
     title: "Payment is being confirmed",
-    detail: "We are waiting for confirmation from Xendit.",
+    detail: "We are waiting for payment confirmation.",
     tone: "text-warning",
   },
   PAID: {
@@ -58,9 +62,12 @@ function StatusIcon({ status }: { status: PaymentStatus }) {
 export default function PaymentResultPage() {
   const searchParams = useSearchParams();
   const orderId = searchParams.get("orderId");
+
   const [payment, setPayment] = useState<Payment | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(Boolean(orderId));
   const [error, setError] = useState("");
+  const [providerNotice, setProviderNotice] = useState("");
+
   const displayError = orderId ? error : "Missing order ID.";
 
   useEffect(() => {
@@ -71,6 +78,7 @@ export default function PaymentResultPage() {
     let active = true;
     let attempts = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
+
     const requestedOrderId = orderId;
 
     async function loadPayment() {
@@ -86,13 +94,24 @@ export default function PaymentResultPage() {
           return;
         }
         setPayment(current);
-        setLoading(false);
+        setError("");
+        setProviderNotice(
+          current.provider === "PRASMUL" &&
+            current.verificationStatus === "UNKNOWN"
+            ? "Payment requires verification. Do not pay again."
+            : "",
+        );
         attempts += 1;
         if (current.status === "PENDING" && attempts < 100) {
           timer = setTimeout(loadPayment, 3000);
         }
+
+        if (active) {
+          setLoading(false);
+        }
       } catch (cause) {
         if (!active) return;
+
         setError(
           cause instanceof Error
             ? cause.message
@@ -103,13 +122,18 @@ export default function PaymentResultPage() {
     }
 
     void loadPayment();
+
     return () => {
       active = false;
       if (timer) clearTimeout(timer);
     };
   }, [orderId]);
 
-  const status = payment?.status ?? "PENDING";
+  const status =
+    payment?.provider === "PRASMUL" &&
+    payment.verificationStatus === "UNKNOWN"
+      ? "PENDING"
+      : payment?.status ?? "PENDING";
   const copy = statusCopy[status];
 
   return (
@@ -122,6 +146,7 @@ export default function PaymentResultPage() {
         >
           <ArrowLeft size={20} />
         </Link>
+
         <div>
           <h1 className="text-xl font-semibold text-ink">Payment status</h1>
           <p className="text-xs text-ink-muted">Order {orderId ?? "unknown"}</p>
@@ -142,14 +167,34 @@ export default function PaymentResultPage() {
             <div className={`mx-auto w-fit ${copy.tone}`}>
               <StatusIcon status={status} />
             </div>
-            <h2 className="mt-4 text-lg font-semibold text-ink">{copy.title}</h2>
+
+            <h2 className="mt-4 text-lg font-semibold text-ink">
+              {copy.title}
+            </h2>
+
             <p className="mt-2 text-sm text-ink-muted">{copy.detail}</p>
+
             <p className="mt-5 text-xl font-bold text-primary">
               {formatRupiah(payment?.grossAmount ?? 0)}
             </p>
+
+            {payment?.provider === "PRASMUL" && providerNotice && (
+              <p
+                role="status"
+                className="mt-3 rounded-xl bg-yellow-50 p-3 text-xs text-ink-muted"
+              >
+                {providerNotice}
+              </p>
+            )}
+
             {status === "PENDING" && (
-              <p role="status" className="mt-3 rounded-xl bg-mint-50 p-3 text-xs text-ink-muted">
-                Payment status updates automatically for up to 5 minutes. You do not need to reload this page.
+              <p
+                role="status"
+                className="mt-3 rounded-xl bg-mint-50 p-3 text-xs text-ink-muted"
+              >
+                {payment?.provider === "PRASMUL"
+                  ? "We are checking the payment confirmation. The payment will only be marked successful after the backend verifies it."
+                  : "Payment status updates automatically for up to 5 minutes. You do not need to reload this page."}
               </p>
             )}
           </>
@@ -163,6 +208,7 @@ export default function PaymentResultPage() {
         >
           View order
         </Link>
+
         <Link
           href="/payments"
           className="flex min-h-11 items-center justify-center rounded-full border border-border bg-white text-sm font-semibold text-ink"

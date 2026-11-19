@@ -11,6 +11,9 @@
   import Product from "@/models/Product";
   import QCAssessment from "@/models/QCAssessment";
   import Notification from "@/models/Notification";
+  import { createQcCompensation, orderHasActiveRefund } from "@/lib/refunds";
+  import { touchSettlementOrderFence } from "@/lib/settlement-order-fence";
+  import { reverseOrderGreenPointRewards } from "@/lib/green-points";
 
   export async function PATCH(
     request: NextRequest,
@@ -198,6 +201,12 @@
 
       try {
         await session.withTransaction(async () => {
+          await touchSettlementOrderFence(order._id, session);
+          const currentOrder = await Order.findById(order._id).session(session);
+          if (!currentOrder || ["CANCELLED", "REFUNDED", "EXPIRED"].includes(currentOrder.status) ||
+            await orderHasActiveRefund(order._id, session)) {
+            throw new Error("QC is unavailable while refund resolution is in progress.");
+          }
           const assessment = new QCAssessment({
             entityType: "order",
             entityId: order._id,
@@ -216,12 +225,6 @@
           });
 
           await assessment.save({ session });
-
-          const currentOrder = await Order.findById(order._id).session(session);
-
-          if (!currentOrder) {
-            throw new Error("Order is no longer available for QC.");
-          }
 
           const currentItem = currentOrder.items.find(
             (entry) =>
@@ -250,18 +253,61 @@
             currentItem.qcDecisionDeadline = undefined;
             await Product.updateOne({ _id: productId }, { $set: { status: "QC_PASSED" } }, { session });
           } else {
-            currentItem.qcStatus = "FAILED_AWAITING_BUYER";
-            currentItem.qcDecisionDeadline = new Date(
-              Date.now() + 3 * 24 * 60 * 60 * 1000,
+            currentItem.qcStatus = "FAILED";
+            currentItem.qcDecisionDeadline = undefined;
+            const returnDeadline = new Date(
+              Date.now() + 14 * 24 * 60 * 60 * 1000,
             );
-            currentOrder.status = "AWAITING_BUYER_CONFIRMATION";
-            await Product.updateOne({ _id: productId }, { $set: { status: "AWAITING_BUYER_CONFIRMATION" } }, { session });
+            for (const orderItem of currentOrder.items) {
+              orderItem.returnStatus = "AWAITING_SELLER";
+              orderItem.returnDeadline = returnDeadline;
+            }
+            currentOrder.status = "CANCELLED";
+            await Product.updateMany(
+              { _id: { $in: currentOrder.items.map((entry) => entry.productId) } },
+              { $set: { status: "RETURN_PENDING" } },
+              { session },
+            );
+          }
+
+          if (!hasIssues) {
+            const allQcResolved = currentOrder.items.every(
+              (entry) =>
+                entry.qcStatus === "PASSED" ||
+                entry.qcStatus === "BUYER_ACCEPTED",
+            );
+            const awaitingBuyerDecision = currentOrder.items.some(
+              (entry) => entry.qcStatus === "FAILED_AWAITING_BUYER",
+            );
+            currentOrder.status = allQcResolved
+              ? "PROCESSING"
+              : awaitingBuyerDecision
+                ? "AWAITING_BUYER_CONFIRMATION"
+                : "QC_IN_PROGRESS";
           }
 
           await currentOrder.save({
             session,
             validateModifiedOnly: true,
           });
+
+          if (hasIssues) {
+            const sellerIds = [
+              ...new Set(currentOrder.items.map((entry) => entry.sellerId.toString())),
+            ];
+            await reverseOrderGreenPointRewards({
+              orderId: currentOrder._id.toString(),
+              buyerId: currentOrder.buyerId.toString(),
+              sellerIds,
+              session,
+            });
+            await createQcCompensation({
+              orderId: currentOrder._id.toString(),
+              userId: currentOrder.buyerId.toString(),
+              productId: productId.toString(),
+              session,
+            });
+          }
 
           await Notification.create(
             [
@@ -270,10 +316,10 @@
                 senderId: new mongoose.Types.ObjectId(auth.user.id),
                 type: "QC_UPDATE",
                 title: hasIssues
-                  ? "QC selesai: pilihan diperlukan"
+                  ? "Order dibatalkan setelah QC"
                   : "QC selesai: barang lolos pemeriksaan",
                 message: hasIssues
-                  ? `Pemeriksaan menemukan ${answers.filter((answer) => answer.optionId !== "good").length} bagian yang perlu kamu tinjau. Buka laporan QC untuk memilih terima atau tolak barang.`
+                  ? "Pemeriksaan menemukan masalah. Seluruh order dibatalkan dan nilai produk dikembalikan sebagai Green Points; kredit mungkin menunggu pendanaan reserve."
                   : "Pemeriksaan kualitas selesai dan barang siap diproses ke tahap berikutnya.",
                 link: `/orders/${currentOrder._id.toString()}`,
                 isRead: false,
@@ -281,6 +327,23 @@
             ],
             { session },
           );
+
+          if (hasIssues) {
+            await Notification.insertMany(
+              [...new Set(currentOrder.items.map((entry) => entry.sellerId.toString()))].map(
+                (sellerId) => ({
+                  recipientId: new mongoose.Types.ObjectId(sellerId),
+                  senderId: new mongoose.Types.ObjectId(auth.user.id),
+                  type: "ORDER_UPDATE",
+                  title: "Items awaiting retrieval",
+                  message: "The order was cancelled after the QC failure. Retrieve all items or request return delivery within 14 calendar days.",
+                  link: `/orders/${currentOrder._id.toString()}`,
+                  isRead: false,
+                }),
+              ),
+              { session },
+            );
+          }
 
           assessmentId = assessment._id;
         });
@@ -308,6 +371,9 @@
     } catch (error) {
       console.error("Save QC assessment error:", error);
 
+      if (error instanceof Error && error.message === "QC is unavailable while refund resolution is in progress.") {
+        return NextResponse.json({ success: false, message: error.message }, { status: 409 });
+      }
       return NextResponse.json(
         {
           success: false,

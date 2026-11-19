@@ -97,6 +97,7 @@ export async function PATCH(request: Request, { params }: RouteContext) {
     const session = await mongoose.startSession();
     let updatedDonation: Awaited<ReturnType<typeof Donation.findById>>;
     let donorId = "";
+    let rewardPending = false;
     try {
       await session.withTransaction(async () => {
         const donation = await Donation.findOne({
@@ -143,13 +144,16 @@ export async function PATCH(request: Request, { params }: RouteContext) {
         }
 
         if (gpAwarded > 0) {
-          await awardGreenPoints({
+          const credit = await awardGreenPoints({
             userId: donorId,
             amount: gpAwarded,
             description: `Donation reward for ${acceptedItems} accepted item${acceptedItems === 1 ? "" : "s"}`,
             referenceKey: `donation:${id}`,
+            source: "DONATION",
             session,
           });
+          rewardPending =
+            "status" in credit && credit.status === "PENDING_REWARD";
         }
       });
     } finally {
@@ -163,7 +167,9 @@ export async function PATCH(request: Request, { params }: RouteContext) {
         title: rejectedItems === totalItems ? "Donation reviewed" : "Donation verification complete",
         message: rejectedItems === totalItems
           ? "Your donation was reviewed, but all items were rejected and no GP was awarded."
-          : `${gpAwarded.toLocaleString("id-ID")} GP was awarded after quality verification.${rejectedItems > 0 ? ` ${rejectedItems} item${rejectedItems === 1 ? " was" : "s were"} rejected.` : ""}`,
+          : rewardPending
+            ? `${gpAwarded.toLocaleString("id-ID")} GP reward is pending reserve funding and is not spendable yet.${rejectedItems > 0 ? ` ${rejectedItems} item${rejectedItems === 1 ? " was" : "s were"} rejected.` : ""}`
+            : `${gpAwarded.toLocaleString("id-ID")} GP was awarded after quality verification.${rejectedItems > 0 ? ` ${rejectedItems} item${rejectedItems === 1 ? " was" : "s were"} rejected.` : ""}`,
         link: "/donate",
       });
     } catch (notificationError) {

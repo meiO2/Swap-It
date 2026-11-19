@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Newspaper, PackageCheck, ShieldCheck, RadioTower } from "lucide-react";
+import { Newspaper, PackageCheck, ShieldCheck, RadioTower, WalletCards } from "lucide-react";
 
 const cards = [
   { href: "/admin/qc", title: "Quality Control", detail: "Review submitted orders and listings.", Icon: ShieldCheck },
@@ -10,6 +10,18 @@ const cards = [
     title: "Swap Hub",
     detail: "Monitor hub devices and simulate QR-based item drop-offs.",
     Icon: RadioTower,
+  },
+  {
+    href: "/admin/green-points",
+    title: "Green Point reserve",
+    detail: "Review funded reserve, pending credits, and record manual top-ups.",
+    Icon: WalletCards,
+  },
+  {
+    href: "/admin/settlements",
+    title: "Delivery & settlements",
+    detail: "Record shipment, delivery, seller settlement, and recovery.",
+    Icon: PackageCheck,
   },
 ];
 

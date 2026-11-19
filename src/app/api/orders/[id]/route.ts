@@ -2,8 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
 import { requireAuth } from "@/lib/authorization";
 import { connectDB } from "@/lib/mongodb";
+import { calculateSellerSettlement } from "@/lib/seller-settlement-calculations";
 import Order from "@/models/Order";
 import QCAssessment from "@/models/QCAssessment";
+import SellerPayable from "@/models/SellerPayable";
 import { buildTimeline } from "@/lib/orders";
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -46,6 +48,40 @@ export async function GET(
       ]),
     );
     const isBuyer = order.buyerId.toString() === auth.user.id;
+    const sellerPayable = isBuyer
+      ? null
+      : await SellerPayable.findOne({
+          orderId: order._id,
+          sellerId: userId,
+        })
+          .select("sellerSubtotal transactionFee payableAmount totalPaid overpaymentReturned status settledAmount settledAt")
+          .lean();
+    const sellerSettlement = sellerPayable
+      ? (() => {
+          const totalPaid =
+            sellerPayable.totalPaid ??
+            sellerPayable.settledAmount ??
+            (sellerPayable.status === "SETTLED"
+              ? sellerPayable.payableAmount
+              : 0);
+          const overpaymentReturned = sellerPayable.overpaymentReturned ?? 0;
+          const settlement = calculateSellerSettlement({
+            payableAmount: sellerPayable.payableAmount,
+            totalPaid,
+            overpaymentReturned,
+          });
+          return {
+            ...sellerPayable,
+            totalPaid,
+            overpaymentReturned,
+            ...settlement,
+            status:
+              sellerPayable.status === "CANCELLED"
+                ? "CANCELLED"
+                : settlement.status,
+          };
+        })()
+      : null;
     const item = order.items[0];
     const timelineIndex =
       ["DELIVERED", "COMPLETED"].includes(order.status) ? 5 :
@@ -70,12 +106,15 @@ export async function GET(
       data: {
         ...order,
         sellerFeeSnapshots: undefined,
+        financialSnapshot: undefined,
         sellerFeeSnapshot: isBuyer
           ? undefined
           : order.sellerFeeSnapshots?.find(
               (snapshot) => snapshot.sellerId.toString() === auth.user.id,
             ),
         id: order._id.toString(),
+        isBuyer,
+        sellerSettlement,
         timeline,
         progress: timelineIndex / 5,
         deliveryMethod: order.deliveryMethod,

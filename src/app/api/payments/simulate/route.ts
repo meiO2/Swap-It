@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { unstable_rethrow } from "next/navigation";
 import mongoose from "mongoose";
 import { requireAuth } from "@/lib/authorization";
 import { connectDB } from "@/lib/mongodb";
@@ -49,6 +50,7 @@ export async function POST(request: NextRequest) {
       orderId: order._id,
       userId: auth.user.id,
       status: "PENDING",
+      $or: [{ provider: "XENDIT" }, { provider: { $exists: false } }],
     }).lean();
     const expectedReferenceId = `swapit-${order._id.toString()}`;
     if (
@@ -71,6 +73,7 @@ export async function POST(request: NextRequest) {
       data: { status: result.status ?? "PENDING" },
     });
   } catch (error) {
+    unstable_rethrow(error);
     console.error("Simulate Xendit payment error:", error);
     return NextResponse.json(
       {

@@ -157,6 +157,27 @@ npm run build
 npm run start
 ```
 
+### Settlement tests
+
+The seller financial resolution worker is exposed at
+`GET /api/cron/seller-financial-resolution` and uses the existing cron bearer
+authentication. Deployment operators must configure an external scheduler to
+call it; no scheduler is enabled by this repository change. Each invocation
+processes at most 25 due jobs. Failed jobs retry with exponential delays and
+require attention after five failures; held jobs do not retry automatically.
+Monitor failed responses and logs, the job's `failedAttempts`, `lastFailureAt`,
+`nextAttemptAt`, and `FAILED_REQUIRES_ATTENTION` status. A safe hold-resolution
+and requeue workflow is not yet available.
+
+`npm run test:financial` runs database-free financial and ledger guard tests.
+`npm run test:settlement:integration` starts its own temporary, local MongoDB
+replica set and verifies the spawned process before creating test data. It does
+not use the application's MongoDB connection configuration. The first run
+downloads a MongoDB binary and requires network access and free disk space.
+These integration tests cover the revision and snapshot helpers, transaction
+rollback, and hold audit, but do not yet exercise the settlement API or refund
+flows. These helpers are not yet integrated into the financial workflows.
+
 ## Environment variables
 
 Create a local `.env` file. Never commit real credentials.
@@ -167,6 +188,13 @@ OTP_SECRET=...
 
 XENDIT_SECRET_KEY=...
 XENDIT_CALLBACK_TOKEN=...
+PAYMENT_PROVIDER=XENDIT
+PRASMUL_BASE_URL=https://digitalcity.id
+PRASMUL_EMAIL=...
+PRASMUL_PASSWORD=...
+PRASMUL_WEBHOOK_URL=https://<your-domain>/api/payments/prasmul/webhook
+# Set only after the provider confirms the time zone, e.g. an IANA zone.
+# PRASMUL_TIME_ZONE=<provider-confirmed-IANA-time-zone>
 
 SHIPPING_MODE=mock
 BITESHIP_API_KEY=...
@@ -184,6 +212,63 @@ CLOUDINARY_API_SECRET=...
 
 - `MONGODB_URI` is required for database-backed features.
 - `OTP_SECRET` signs email-verification OTP data.
+- `PAYMENT_PROVIDER` selects `XENDIT` (default) or `PRASMUL`; invalid values
+  reject payment creation. PRASMUL credentials are server-only. Selecting
+  PRASMUL does not enable new payments: creation and QR display are disabled
+  until verified confirmation and lifecycle handling are implemented.
+- The previously supplied Digital City tutorial summary identifies the login
+  path, `PRASMUL-` reference prefix, `webhook_url` and `qr_string`. Set
+  `PRASMUL_BASE_URL` explicitly;
+  the legacy login remains in use for other configured hosts. The Orders
+  create endpoint, request amount semantics and response shape still need
+  provider confirmation. Existing payments can be checked using the legacy
+  order-detail path, but successful and expired statuses are not yet verified.
+  Polling is the intended confirmation method; callbacks do not finalize
+  payments. The Postman collection's legacy `/api/partners/orders/` create
+  payload uses `callback_url`; it is not evidence that the Digital City
+  tutorial's `webhook_url` works on that endpoint. Digital City creation
+  remains blocked until its complete Orders contract is verified. The supplied
+  screen recording's sampled frames show the legacy login and Orders paths and
+  an unpaid response; those frames do not establish paid or expired statuses.
+  `PRASMUL_WEBHOOK_URL` must be the application's HTTPS URL ending in
+  `/api/payments/prasmul/webhook` or `/api/payments/prasmul/callback/qris`.
+  The webhook returns 503; the QRIS callback also returns 503 by default and
+  outside development. No production callback is configured automatically.
+- For callback payload testing only, set `PRASMUL_QRIS_CALLBACK_TEST_MODE=true`
+  on an isolated development server. `POST /api/payments/prasmul/callback/qris`
+  accepts the supplied `qr.payment`/`COMPLETED` example and returns 200 with
+  `mode: "TEST"`, `authenticated: false`, and `paymentProcessed: false`.
+  Invalid JSON or fields return 400, and non-JSON content returns 415. This
+  does not verify PRASMUL, look up a payment, or change financial data.
+  Outside development it returns 503 even if the flag is set.
+
+  In an isolated copy without `.env` files, database connections, or production
+  credentials, start the development server in PowerShell:
+
+  ```powershell
+  $env:PRASMUL_QRIS_CALLBACK_TEST_MODE = 'true'
+  npm run dev
+  ```
+
+  Then run in another PowerShell terminal:
+
+  ```powershell
+  Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:3000/api/payments/prasmul/callback/qris' -ContentType 'application/json' -Body '{"event":"qr.payment","data":{"id":"simulasi-qris-icdec-01","reference_id":"PRASMUL-507f1f77bcf86cd799439011","status":"COMPLETED","amount":157050}}'
+  ```
+- The provider's `YYYY-MM-DD | HH:mm:ss` expiry has no offset. Configure
+  `PRASMUL_TIME_ZONE` only after PRASMUL confirms its IANA time zone; missing,
+  invalid, ambiguous, or nonexistent times cannot be used to display a QR.
+  An expiry is not evidence that the provider has marked a payment expired.
+  Remote amount and expiry metadata are retained for reconciliation if the
+  expiry cannot be validated. After a successful create response, its identity
+  and amount are recorded before fetching order detail; a `partner_order_id`,
+  when supplied, is retained as reconciliation metadata, not payment proof.
+  An unavailable or inconsistent detail response does not expose a QR. The
+  fee calculation is only a local estimate;
+  provider rounding and the actual amount must be verified independently.
+  Creating a new PRASMUL payment also requires an installed, unconditional
+  unique MongoDB index on `Payment.orderId`; verify deployment indexes and
+  cross-provider races before enabling creation.
 - `XENDIT_SECRET_KEY` is server-only. Use a test/development key while
   testing and a production key only after completing Xendit account setup.
   The key needs Money-in Write permission and QRIS must be enabled.
@@ -195,6 +280,14 @@ CLOUDINARY_API_SECRET=...
 - Xendit dynamic QRIS transactions must be between Rp1.500 and Rp10.000.000.
 - The payment page offers a test-only simulation button when `XENDIT_SECRET_KEY`
   uses an Xendit development key. The simulation API rejects production keys.
+- Before enabling PRASMUL, obtain provider documentation and isolated sandbox
+  evidence for paid, expired and failed status values; callback payload,
+  authentication and delivery/retry behavior; reference and QR identity;
+  amount, fee and rounding rules; and cancellation and reconciliation. Then
+  implement and test idempotent order, product and GP lifecycle transitions,
+  duplicate/timeout races, and provider-authenticated confirmation. Do not
+  expose existing QR codes until those checks and deployment configuration
+  have been verified.
 - `SHIPPING_MODE=mock` is the default development mode.
 - Set `SHIPPING_MODE=biteship` to use Biteship.
 - Biteship API keys must remain server-side.

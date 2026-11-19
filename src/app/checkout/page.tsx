@@ -25,6 +25,7 @@ import {
   SELLER_MINIMUM_MESSAGE,
 } from "@/lib/fees";
 import { QRIS_AMOUNT_MESSAGE, QRIS_MAX_AMOUNT, QRIS_MIN_AMOUNT } from "@/lib/payment-limits";
+import { calculateMaximumGpRedemption } from "@/lib/financial-model";
 
 interface CartProduct {
   _id: string;
@@ -63,6 +64,7 @@ interface ShippingRate {
 
 interface GreenPointResponse {
   balance: number;
+  redemptionAllowed: boolean;
 }
 
 export default function CheckoutPage() {
@@ -103,6 +105,7 @@ export default function CheckoutPage() {
   const [shippingLoading, setShippingLoading] = useState(false);
   const [shippingError, setShippingError] = useState("");
   const [gpBalance, setGpBalance] = useState(0);
+  const [gpRedemptionAllowed, setGpRedemptionAllowed] = useState(true);
   const [gpUsed, setGpUsed] = useState(0);
 
   const subtotal = useMemo(
@@ -127,7 +130,12 @@ export default function CheckoutPage() {
       price: item.productId.price,
     })),
   ).some((snapshot) => snapshot.netAmount < 0);
-  const paymentAmount = subtotal + (selectedShippingRate?.price ?? 0) + serviceFee - gpUsed;
+  const maximumGp = Math.min(
+    gpBalance,
+    calculateMaximumGpRedemption(subtotal),
+  );
+  const appliedGpUsed = Math.min(gpUsed, maximumGp);
+  const paymentAmount = subtotal + (selectedShippingRate?.price ?? 0) + serviceFee - appliedGpUsed;
   const paymentAmountInvalid = paymentAmount < QRIS_MIN_AMOUNT || paymentAmount > QRIS_MAX_AMOUNT;
   const eta = etaStart
     ? estimateArrival(etaStart, courier.minDays, courier.maxDays)
@@ -184,9 +192,10 @@ export default function CheckoutPage() {
     const timer = window.setTimeout(() => {
       apiRequest<GreenPointResponse>("/api/green-points")
         .then((data) => {
-          const balance = Math.max(0, data.balance);
+          const balance = data.redemptionAllowed ? Math.max(0, data.balance) : 0;
+          setGpRedemptionAllowed(data.redemptionAllowed);
           setGpBalance(balance);
-          setGpUsed(Math.min(balance, subtotal));
+          setGpUsed(Math.min(balance, calculateMaximumGpRedemption(subtotal)));
         })
         .catch((cause: unknown) => console.error("Could not load Green Point balance.", cause));
     }, 0);
@@ -319,7 +328,7 @@ export default function CheckoutPage() {
         method: "POST",
         body: JSON.stringify({
           deliveryMethod: "courier",
-          gpUsed,
+          gpUsed: appliedGpUsed,
           courierCode: courierId,
           shippingAddress: {
             name: address.name,
@@ -593,26 +602,27 @@ export default function CheckoutPage() {
                 Green Points
               </h2>
               <span className="text-sm font-semibold text-primary">
-                {gpUsed.toLocaleString("id-ID")} GP
+                {appliedGpUsed.toLocaleString("id-ID")} GP
               </span>
             </div>
             <input
               type="range"
               min={0}
-              max={Math.min(gpBalance, subtotal)}
+              max={maximumGp}
               step={1}
-              value={gpUsed}
+              value={appliedGpUsed}
               onChange={(event) => setGpUsed(Number(event.target.value))}
               aria-label="Green Points to use"
               className="mt-4 h-2 w-full cursor-pointer accent-primary"
             />
             <div className="mt-1 flex justify-between text-[10px] text-ink-muted">
               <span>0 GP</span>
-              <span>{Math.min(gpBalance, subtotal).toLocaleString("id-ID")} GP available</span>
+              <span>Maximum {maximumGp.toLocaleString("id-ID")} GP (30% of product value)</span>
             </div>
             <p className="mt-2 text-xs leading-relaxed text-ink-muted">
-              Choose how many Green Points to use. Shipping cannot be paid
-              with GP.
+              {gpRedemptionAllowed
+                ? "Choose how many Green Points to use, up to 30% of the product value. Shipping and service fees cannot be paid with GP."
+                : "GP redemption is temporarily unavailable because reserve coverage is insufficient."}
             </p>
           </section>
 
@@ -640,7 +650,7 @@ export default function CheckoutPage() {
 
             <BreakdownRow
               label="Green Points applied"
-              value={`${gpUsed.toLocaleString("id-ID")} GP`}
+              value={`${appliedGpUsed.toLocaleString("id-ID")} GP`}
             />
 
             <BreakdownRow
@@ -649,7 +659,7 @@ export default function CheckoutPage() {
             />
 
             <BreakdownRow
-              label="Service fee (2.5%)"
+              label="Service fee (3%)"
               amount={serviceFee}
             />
 

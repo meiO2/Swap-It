@@ -8,7 +8,10 @@ import {
 import Order from "@/models/Order";
 import Payment, { type PaymentStatus } from "@/models/Payment";
 import Product from "@/models/Product";
-import { awardGreenPoints, GREEN_POINT_REWARDS } from "@/lib/green-points";
+import {
+  consumeReservedGreenPoints,
+  restoreReservedGreenPoints,
+} from "@/lib/green-points";
 import { createNotificationsForMany } from "@/lib/notifications";
 
 type XenditSessionNotification = {
@@ -120,6 +123,7 @@ export async function POST(request: Request) {
         ? { xenditQrCodeId: providerPaymentId }
         : { xenditSessionId: providerPaymentId }),
       xenditReferenceId: referenceId,
+      $or: [{ provider: "XENDIT" }, { provider: { $exists: false } }],
       orderId,
     });
     if (!payment) {
@@ -182,7 +186,11 @@ export async function POST(request: Request) {
             { session },
           );
           const paidOrder = await Order.findById(orderId).session(session).lean();
-          if (paidOrder) {
+          if (paidOrder?.status === "AWAITING_SELLER_HANDOVER") {
+            await consumeReservedGreenPoints({
+              orderId: paidOrder._id.toString(),
+              session,
+            });
             await Product.updateMany(
               { _id: { $in: paidOrder.items.map((item) => item.productId) }, status: "RESERVED" },
               { $set: { status: "SOLD_PENDING_HANDOVER" } },
@@ -201,18 +209,6 @@ export async function POST(request: Request) {
               link: "/orders",
               session,
             });
-            const reward = Math.floor(
-              paidOrder.subtotal * GREEN_POINT_REWARDS.purchaseRate,
-            );
-            if (reward > 0) {
-              await awardGreenPoints({
-                userId: paidOrder.buyerId.toString(),
-                amount: reward,
-                description: "Completed marketplace purchase reward",
-                referenceKey: `purchase:${paidOrder._id.toString()}`,
-                session,
-              });
-            }
           }
         } else {
           await Order.updateOne(
@@ -240,12 +236,12 @@ export async function POST(request: Request) {
             { session },
           );
           if (cancelledOrder && (cancelledOrder.gpUsed ?? 0) > 0) {
-            await awardGreenPoints({
+            await restoreReservedGreenPoints({
               userId: cancelledOrder.buyerId.toString(),
+              orderId: cancelledOrder._id.toString(),
               amount: cancelledOrder.gpUsed ?? 0,
-              type: "REFUND",
-              description: "Green Points returned after payment expiration",
               referenceKey: `order:${cancelledOrder._id.toString()}:gp-refund`,
+              description: "Green Points returned after payment expiration",
               session,
             });
           }

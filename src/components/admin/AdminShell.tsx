@@ -13,6 +13,7 @@
     X,
     RotateCcw,
     RadioTower,
+    WalletCards,
   } from "lucide-react";
   import { useAuth, type AuthUser } from "@/components/auth/AuthProvider";
 
@@ -21,6 +22,8 @@
     { href: "/admin/qc", label: "Quality Control", Icon: ShieldCheck, adminOnly: false },
     { href: "/admin/refunds", label: "Refunds", Icon: RotateCcw, adminOnly: false },
     { href: "/admin/donations", label: "Donation GP", Icon: Gift, adminOnly: false },
+    { href: "/admin/green-points", label: "GP Reserve", Icon: WalletCards, adminOnly: true },
+    { href: "/admin/settlements", label: "Delivery & settlements", Icon: PackageCheck, adminOnly: true },
     { href: "/admin/hubs", label: "Swap Hub", Icon: RadioTower, adminOnly: true },
     { href: "/admin/revamp", label: "Revamp! Merchandise", Icon: PackageCheck, adminOnly: true },
     { href: "/admin/news", label: "News", Icon: Newspaper, adminOnly: true },
