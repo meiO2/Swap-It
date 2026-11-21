@@ -6,6 +6,7 @@ import { connectDB } from "@/lib/mongodb";
 import { getPrasmulOrderDetail, PrasmulApiError } from "@/lib/prasmul";
 import Payment from "@/models/Payment";
 import { verifyPrasmulStatus } from "@/lib/prasmul-status";
+import { finalizePrasmulPayment } from "@/lib/prasmul-finalization";
 
 export async function GET(request: NextRequest) {
   try {
@@ -81,9 +82,11 @@ export async function GET(request: NextRequest) {
     }
 
     const mappedStatus = verifyPrasmulStatus(payment, remoteOrder);
-
-    // Endpoint ini hanya membaca status.
-    // Tidak mengubah Payment atau Order menjadi PAID.
+    let localStatus = payment.status;
+    if (mappedStatus === "PAID" && payment.status === "PENDING") {
+      await finalizePrasmulPayment(payment);
+      localStatus = "PAID";
+    }
     return NextResponse.json({
       success: true,
       data: {
@@ -91,7 +94,7 @@ export async function GET(request: NextRequest) {
         orderId: payment.orderId,
         provider: "PRASMUL",
 
-        localStatus: payment.status,
+        localStatus,
         providerStatus: remoteOrder.status,
         mappedStatus,
 
@@ -105,7 +108,7 @@ export async function GET(request: NextRequest) {
         verifiedReference: true,
         verifiedAmount: true,
         verifiedPaymentMethod: true,
-        verifiedQrId: Boolean(payment.prasmulQrId),
+        verifiedQrId: Boolean(payment.prasmulQrId && remoteOrder.qr_id),
       },
     });
   } catch (error) {

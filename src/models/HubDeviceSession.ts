@@ -26,6 +26,10 @@
 
     state: HubSessionState;
     itemDetected: boolean;
+    remoteUnlock?: {
+        status: "PENDING" | "CLAIMED" | "RELAY_ACTIVATED";
+        expiresAt: Date;
+    };
 
     events: {
         event: string;
@@ -83,6 +87,17 @@
         type: Boolean,
         default: false,
         required: true,
+        },
+        remoteUnlock: {
+        type: new Schema({
+            status: {
+            type: String,
+            enum: ["PENDING", "CLAIMED", "RELAY_ACTIVATED"],
+            required: true,
+            },
+            expiresAt: { type: Date, required: true },
+        }, { _id: false }),
+        required: false,
         },
         events: [
         {

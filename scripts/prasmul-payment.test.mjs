@@ -8,7 +8,6 @@ import { tmpdir } from "node:os";
 import mongoose from "mongoose";
 import {
   calculatePrasmulBasicPrice,
-  createPrasmulQrOrder,
   getPrasmulOrderDetail,
   getPrasmulOrders,
   getPrasmulOrderReference,
@@ -22,7 +21,12 @@ import {
   PrasmulQrError,
 } from "../src/lib/prasmul.ts";
 import { parsePaymentProvider } from "../src/lib/payment-provider.ts";
-import { verifyPrasmulStatus } from "../src/lib/prasmul-status.ts";
+import { isMongoTransactionsUnsupported } from "../src/lib/mongodb-transactions.ts";
+import {
+  PrasmulStatusMismatchError,
+  verifyPrasmulCallbackStatus,
+  verifyPrasmulStatus,
+} from "../src/lib/prasmul-status.ts";
 
 test("provider selection defaults to Xendit and rejects invalid settings", () => {
   assert.equal(parsePaymentProvider(undefined), "XENDIT");
@@ -30,10 +34,21 @@ test("provider selection defaults to Xendit and rejects invalid settings", () =>
   assert.throws(() => parsePaymentProvider("invalid"), /Invalid payment provider/);
 });
 
+test("standalone MongoDB transaction errors are distinguished from other failures", () => {
+  const standalone = Object.assign(
+    new Error("Transaction numbers are only allowed on a replica set member or mongos"),
+    { code: 20 },
+  );
+  assert.equal(isMongoTransactionsUnsupported(standalone), true);
+  assert.equal(isMongoTransactionsUnsupported(Object.assign(new Error("other"), { code: 20 })), false);
+  assert.equal(isMongoTransactionsUnsupported(new Error(standalone.message)), false);
+});
+
 test("fee estimation reproduces the observed amount without changing checkout", () => {
   const estimate = calculatePrasmulBasicPrice(358620);
   assert.equal(estimate.basicPrice, 350000);
   assert.equal(estimate.estimatedAmount, 358620);
+  assert.equal(calculatePrasmulBasicPrice(15978).basicPrice, 10000);
   assert.throws(() => calculatePrasmulBasicPrice(0), /Invalid/);
   assert.throws(() => calculatePrasmulBasicPrice(5965), /No PRASMUL basic price/);
 });
@@ -101,23 +116,6 @@ test("new references are stable and QR strings reject conflicting values", () =>
   assert.throws(() => getPrasmulQrString({ qr_string: "one", payment_code: "two" }), /conflicting/);
 });
 
-test("unverified create contract cannot send a provider request", async () => {
-  let calls = 0;
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => { calls += 1; throw new Error("unexpected request"); };
-  try {
-    await assert.rejects(() => createPrasmulQrOrder({
-      orderId: "PRASMUL-order-123",
-      targetAmount: 358620,
-      description: "Test",
-      webhookUrl: "https://example.invalid/api/payments/prasmul/webhook",
-    }), /contract is not verified/);
-    assert.equal(calls, 0);
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-});
-
 test("concurrent detail polling refreshes an expired token once", async () => {
   process.env.PRASMUL_BASE_URL = "https://digitalcity.id";
   process.env.PRASMUL_EMAIL = "test@example.invalid";
@@ -173,9 +171,10 @@ const remote = {
   status: "Belum Lunas",
 };
 
-test("only observed PRASMUL status is pending and unknown never means paid", () => {
+test("PRASMUL maps verified paid and pending statuses without guessing others", () => {
   assert.equal(verifyPrasmulStatus(stored, remote), "PENDING");
-  assert.equal(verifyPrasmulStatus(stored, { ...remote, status: "Lunas" }), "UNKNOWN");
+  assert.equal(verifyPrasmulStatus(stored, { ...remote, status: "Lunas" }), "PAID");
+  assert.equal(verifyPrasmulStatus(stored, { ...remote, qr_id: undefined, status: "Lunas" }), "PAID");
   assert.equal(verifyPrasmulStatus(stored, { ...remote, status: "Expired" }), "UNKNOWN");
   for (const change of [
     { order_id: "other" }, { payment_method: "OTHER" }, { qr_id: "other" },
@@ -183,7 +182,57 @@ test("only observed PRASMUL status is pending and unknown never means paid", () 
   ]) {
     assert.throws(() => verifyPrasmulStatus(stored, { ...remote, ...change }), /do not match/);
   }
-  assert.throws(() => verifyPrasmulStatus({ ...stored, prasmulQrId: undefined }, remote), /do not match/);
+  assert.equal(verifyPrasmulStatus({ ...stored, prasmulQrId: undefined }, remote), "PENDING");
+});
+
+test("callback verification binds the provider order and amount without equating transaction IDs", () => {
+  const payment = {
+    prasmulOrderId: "prasmul-202611-003",
+    prasmulAmount: 15978,
+    grossAmount: 15978,
+    paymentType: "QRIS",
+  };
+  const detail = {
+    id: 13,
+    order_id: "prasmul-202611-003",
+    status: "Lunas",
+    payment_method: "QRIS",
+    amount: 15978,
+  };
+  assert.equal(verifyPrasmulCallbackStatus(payment, detail, "PRASMUL-202611-003", 15978), "PAID");
+  assert.equal(verifyPrasmulCallbackStatus(payment, { ...detail, order_id: "PRASMUL-202611-003" }, payment.prasmulOrderId, 15978), "PAID");
+  assert.equal(verifyPrasmulCallbackStatus(payment, { ...detail, status: "Belum Lunas" }, payment.prasmulOrderId, 15978), "PENDING");
+  assert.equal(verifyPrasmulCallbackStatus(payment, { ...detail, status: "Expired" }, payment.prasmulOrderId, 15978), "UNKNOWN");
+  assert.equal(verifyPrasmulCallbackStatus(
+    { ...payment, prasmulAmount: undefined },
+    { ...detail, qr_id: "new-qr" },
+    payment.prasmulOrderId,
+    15978,
+  ), "PAID");
+  assert.throws(() => verifyPrasmulCallbackStatus(
+    { ...payment, prasmulAmount: 15979 }, detail, payment.prasmulOrderId, 15978,
+  ), PrasmulStatusMismatchError);
+  assert.throws(() => verifyPrasmulCallbackStatus(
+    { ...payment, prasmulAmount: undefined },
+    { ...detail, amount: 15979 },
+    payment.prasmulOrderId,
+    15978,
+  ), PrasmulStatusMismatchError);
+  for (const change of [
+    { order_id: "prasmul-202611-004" },
+    { payment_method: "OTHER" },
+    { amount: 15979 },
+    { qr_id: null },
+  ]) {
+    assert.throws(() => verifyPrasmulCallbackStatus(payment, { ...detail, ...change }, payment.prasmulOrderId, 15978), PrasmulStatusMismatchError);
+  }
+  assert.throws(() => verifyPrasmulCallbackStatus(
+    { ...payment, prasmulQrId: "expected" },
+    { ...detail, qr_id: "unexpected" },
+    payment.prasmulOrderId,
+    15978,
+  ), PrasmulStatusMismatchError);
+  assert.throws(() => verifyPrasmulCallbackStatus(payment, detail, payment.prasmulOrderId, 15979), PrasmulStatusMismatchError);
 });
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "src");
@@ -191,10 +240,11 @@ const stubs = {
   "@/lib/authorization": "export const requireAuth = async () => globalThis.__paymentTest.auth;",
   "@/lib/mongodb": "export const connectDB = async () => {};",
   "@/lib/xendit": "export const isXenditTestMode = () => true; export const createXenditQrCode = async () => { throw Error('unexpected create'); }; export const getXenditQrCode = async () => { throw Error('unexpected lookup'); }; export const getXenditPaymentSession = getXenditQrCode;",
-  "@/lib/prasmul": "export const { PrasmulApiError, PrasmulAmountError, PrasmulExpiryError, PrasmulQrError, getPrasmulQrString, getPrasmulOrderReference, calculatePrasmulBasicPrice, hasUniquePaymentOrderIndex, parsePrasmulExpiry } = globalThis.__prasmulTestLib; export const createPrasmulQrOrder = async () => { const s = globalThis.__paymentTest; s.creates++; if (!s.fakeProvider) throw Error('unexpected create'); await new Promise(resolve => setTimeout(resolve, 50)); s.providerCreated = true; return { order: s.createdOrder ?? s.remote }; }; export const getPrasmulOrderDetail = async () => { const s = globalThis.__paymentTest; s.lookups++; if (s.lookupError === 'not-found' || (s.fakeProvider && !s.providerCreated)) throw new PrasmulApiError('not found', 404); if (s.lookupError || (s.fakeProvider && s.providerCreated && s.failDetailAfterCreate)) throw Error('timeout'); return s.remote; };",
-  "@/lib/prasmul-status": "export let PRASMUL_CONFIRMATION_VERIFIED = false; export const setTestConfirmation = value => { PRASMUL_CONFIRMATION_VERIFIED = value; }; export const verifyPrasmulStatus = (...args) => globalThis.__prasmulTestVerify(...args);",
-  "@/models/Payment": "export default { collection: { indexes: async () => globalThis.__paymentTest.realModel ? globalThis.__paymentTest.realModel.collection.indexes() : globalThis.__paymentTest.indexes }, findOne: (...args) => globalThis.__paymentTest.realModel ? globalThis.__paymentTest.realModel.findOne(...args) : ({ lean: async () => globalThis.__paymentTest.payment }), findById: (...args) => globalThis.__paymentTest.realModel ? globalThis.__paymentTest.realModel.findById(...args) : ({ lean: async () => globalThis.__paymentTest.payment }), find: () => ({ sort: () => ({ lean: async () => globalThis.__paymentTest.payment ? [globalThis.__paymentTest.payment] : [] }) }), updateOne: async (...args) => { if (globalThis.__paymentTest.realModel) return globalThis.__paymentTest.realModel.updateOne(...args); const p = globalThis.__paymentTest.payment; for (const [key, value] of Object.entries(args[1].$set)) { if (key.startsWith('paymentData.')) { p.paymentData ??= {}; p.paymentData[key.slice(12)] = value; } else p[key] = value; } globalThis.__paymentTest.mutations++; }, create: async (...args) => { globalThis.__paymentTest.localCreates++; if (globalThis.__paymentTest.realModel) return globalThis.__paymentTest.realModel.create(...args); throw Error('unexpected local create'); }, findOneAndUpdate: async () => { globalThis.__paymentTest.mutations++; throw Error('unexpected payment mutation'); } };",
-  "@/models/Order": "export default { findOne: () => ({ lean: async () => globalThis.__paymentTest.order }), exists: async () => true, updateOne: async () => { globalThis.__paymentTest.mutations++; } };",
+  "@/lib/prasmul": "export const { PrasmulApiError, PrasmulAmountError, PrasmulExpiryError, PrasmulQrError, getPrasmulQrString, getPrasmulOrderReference, calculatePrasmulBasicPrice, hasUniquePaymentOrderIndex, parsePrasmulExpiry } = globalThis.__prasmulTestLib; export const assertPrasmulConfigured = () => {}; export const createPrasmulQrOrder = async () => { const s = globalThis.__paymentTest; s.creates++; if (!s.fakeProvider) throw Error('unexpected create'); await new Promise(resolve => setTimeout(resolve, 50)); s.providerCreated = true; return { order: s.createdOrder ?? s.remote }; }; export const getPrasmulOrderDetail = async () => { const s = globalThis.__paymentTest; s.lookups++; if (s.lookupError === 'not-found' || (s.fakeProvider && !s.providerCreated)) throw new PrasmulApiError('not found', 404); if (s.lookupError || (s.fakeProvider && s.providerCreated && s.failDetailAfterCreate)) throw Error('timeout'); return s.remote; };",
+  "@/lib/prasmul-status": "export const verifyPrasmulStatus = (...args) => globalThis.__prasmulTestVerify(...args); export const verifyPrasmulCallbackStatus = (...args) => globalThis.__prasmulCallbackTestVerify(...args); export const PrasmulStatusMismatchError = globalThis.__prasmulStatusMismatchError;",
+  "@/lib/prasmul-finalization": "export const finalizePrasmulPayment = async () => { const s = globalThis.__paymentTest; if (s.finalizationError) throw new Error('finalization failed'); if (s.payment.status === 'PENDING') { s.payment.status = 'PAID'; s.mutations++; } return { alreadyProcessed: false }; };",
+  "@/models/Payment": "export default { collection: { indexes: async () => globalThis.__paymentTest.realModel ? globalThis.__paymentTest.realModel.collection.indexes() : globalThis.__paymentTest.indexes }, findOne: (...args) => globalThis.__paymentTest.realModel ? globalThis.__paymentTest.realModel.findOne(...args) : ({ lean: async () => globalThis.__paymentTest.payment }), findById: (...args) => globalThis.__paymentTest.realModel ? globalThis.__paymentTest.realModel.findById(...args) : ({ lean: async () => globalThis.__paymentTest.payment }), find: () => ({ sort: () => ({ lean: async () => globalThis.__paymentTest.payment ? [globalThis.__paymentTest.payment] : [] }), limit: () => ({ lean: async () => globalThis.__paymentTest.payment ? [globalThis.__paymentTest.payment] : [] }) }), updateOne: async (...args) => { if (globalThis.__paymentTest.realModel) return globalThis.__paymentTest.realModel.updateOne(...args); const p = globalThis.__paymentTest.payment; for (const [key, value] of Object.entries(args[1].$set)) { if (key.startsWith('paymentData.')) { p.paymentData ??= {}; p.paymentData[key.slice(12)] = value; } else p[key] = value; } globalThis.__paymentTest.mutations++; return { matchedCount: 1 }; }, create: async (...args) => { globalThis.__paymentTest.localCreates++; if (globalThis.__paymentTest.realModel) return globalThis.__paymentTest.realModel.create(...args); throw Error('unexpected local create'); }, findOneAndUpdate: async () => { globalThis.__paymentTest.mutations++; throw Error('unexpected payment mutation'); } };",
+  "@/models/Order": "export default { findOne: () => ({ lean: async () => globalThis.__paymentTest.order, select: () => ({ lean: async () => globalThis.__paymentTest.order }) }), exists: async () => true, updateOne: async (...args) => { if (globalThis.__paymentTest.realOrderModel) return globalThis.__paymentTest.realOrderModel.updateOne(...args); globalThis.__paymentTest.mutations++; return { matchedCount: 1 }; } };",
   "@/models/Cart": "export default {};",
   "@/models/Product": "export default { updateMany: async () => { globalThis.__paymentTest.mutations++; } };",
   "@/lib/green-points": "export const consumeReservedGreenPoints = async () => { globalThis.__paymentTest.mutations++; }; export const restoreReservedGreenPoints = async () => { globalThis.__paymentTest.mutations++; };",
@@ -210,44 +260,33 @@ registerHooks({
     if (specifier === "./prasmul/route") {
       return { url: pathToFileURL(path.join(root, "app", "api", "payments", "prasmul", "route.ts")).href, shortCircuit: true };
     }
-    if (specifier === "../../webhook/route" && context.parentURL?.endsWith("/callback/qris/route.ts")) {
-      return { url: pathToFileURL(path.join(root, "app", "api", "payments", "prasmul", "webhook", "route.ts")).href, shortCircuit: true };
-    }
     if (specifier.startsWith("@/")) {
       return { url: pathToFileURL(path.join(root, `${specifier.slice(2)}.ts`)).href, shortCircuit: true };
     }
     return nextResolve(specifier, context);
   },
-  load(url, context, nextLoad) {
-    const result = nextLoad(url, context);
-    if (!url.endsWith("prasmul.ts?legacy-contract-test")) return result;
-    const source = String(result.source);
-    const guard = "const PRASMUL_CREATE_CONTRACT_VERIFIED = false;";
-    assert.ok(source.includes(guard));
-    return { ...result, source: source.replace(guard, "const PRASMUL_CREATE_CONTRACT_VERIFIED = true;") };
-  },
 });
 
-test("legacy Postman create payload is used only in an isolated mock", async () => {
-  const { createPrasmulQrOrder: createForTest } = await import("../src/lib/prasmul.ts?legacy-contract-test");
-  process.env.PRASMUL_BASE_URL = "https://legacy.example.invalid";
+test("Digital City create uses the supplied Postman contract", async () => {
+  const { createPrasmulQrOrder: createForTest } = await import("../src/lib/prasmul.ts?digital-city-contract-test");
+  process.env.PRASMUL_BASE_URL = "https://digitalcity.id";
   process.env.PRASMUL_EMAIL = "test@example.invalid";
   process.env.PRASMUL_PASSWORD = "test-only";
   const input = {
     orderId: "PRASMUL-order-123",
     targetAmount: 358620,
     description: "Test",
-    webhookUrl: "https://example.invalid/api/payments/prasmul/webhook",
+    webhookUrl: "https://example.invalid/api/payments/prasmul/callback/qris",
   };
   const originalFetch = globalThis.fetch;
   let calls = 0;
   globalThis.fetch = async (url, options) => {
     calls += 1;
-    if (url === "https://legacy.example.invalid/api/partners/login/") {
+    if (url === "https://digitalcity.id/api/partner/auth/login") {
       assert.equal(options.method, "POST");
       return Response.json({ token: "test-only" });
     }
-    assert.equal(url, "https://legacy.example.invalid/api/partners/orders/");
+    assert.equal(url, "https://digitalcity.id/api/partners/orders/");
     assert.equal(options.method, "POST");
     assert.equal(options.headers.Authorization, "Token test-only");
     assert.deepEqual(JSON.parse(options.body), {
@@ -261,7 +300,7 @@ test("legacy Postman create payload is used only in an isolated mock", async () 
     void payment_method;
     return Response.json({
       status: "success",
-      data: { ...createResponse, order_id: input.orderId, payment_code: "test-qr", expired_payment: "2026-11-20 | 14:48:09" },
+      data: { ...createResponse, order_id: input.orderId.toLowerCase(), payment_code: "test-qr", expired_payment: "2026-11-20 | 14:48:09" },
     });
   };
   try {
@@ -270,9 +309,6 @@ test("legacy Postman create payload is used only in an isolated mock", async () 
     const result = await createForTest(input);
     assert.equal(result.amountMatchesTarget, true);
     assert.equal(calls, 2);
-    process.env.PRASMUL_BASE_URL = "https://digitalcity.id";
-    await assert.rejects(() => createForTest(input), /Digital City order creation contract is not verified/);
-    assert.equal(calls, 2);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -280,10 +316,11 @@ test("legacy Postman create payload is used only in an isolated mock", async () 
 
 globalThis.__prasmulTestLib = { PrasmulApiError, PrasmulAmountError, PrasmulExpiryError, PrasmulQrError, getPrasmulQrString, getPrasmulOrderReference, calculatePrasmulBasicPrice, hasUniquePaymentOrderIndex, parsePrasmulExpiry };
 globalThis.__prasmulTestVerify = verifyPrasmulStatus;
+globalThis.__prasmulCallbackTestVerify = verifyPrasmulCallbackStatus;
+globalThis.__prasmulStatusMismatchError = PrasmulStatusMismatchError;
 const { POST, GET } = await import("../src/app/api/payments/route.ts");
 const { POST: postWebhook } = await import("../src/app/api/payments/prasmul/webhook/route.ts");
 const { POST: postQrisCallback } = await import("../src/app/api/payments/prasmul/callback/qris/route.ts");
-const { setTestConfirmation } = await import("@/lib/prasmul-status");
 const orderId = "507f1f77bcf86cd799439011";
 const future = new Date(Date.now() + 600000);
 const makeRequest = (method, requestedOrderId = orderId) => new Request(`http://localhost/api/payments${method === "GET" ? `?orderId=${requestedOrderId}` : ""}`, {
@@ -309,16 +346,40 @@ test("mocked enabled route rejects unreachable amounts before local or provider 
   process.env.PAYMENT_PROVIDER = "PRASMUL";
   setupPayment(null);
   globalThis.__paymentTest.order.totalAmount = 5965;
-  setTestConfirmation(true);
+  const response = await POST(makeRequest("POST"));
+  assert.equal(response.status, 409);
+  assert.match((await response.json()).message, /exact QRIS amount/);
+  assert.equal(globalThis.__paymentTest.localCreates, 0);
+  assert.equal(globalThis.__paymentTest.lookups, 0);
+  assert.equal(globalThis.__paymentTest.creates, 0);
+});
+
+test("production requires the canonical callback URL while preview can use its own domain", async () => {
+  const keys = ["NODE_ENV", "VERCEL_ENV", "PAYMENT_PROVIDER", "PRASMUL_WEBHOOK_URL"];
+  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  process.env.NODE_ENV = "production";
+  process.env.PAYMENT_PROVIDER = "PRASMUL";
   try {
-    const response = await POST(makeRequest("POST"));
-    assert.equal(response.status, 409);
-    assert.match((await response.json()).message, /exact QRIS amount/);
-    assert.equal(globalThis.__paymentTest.localCreates, 0);
-    assert.equal(globalThis.__paymentTest.lookups, 0);
-    assert.equal(globalThis.__paymentTest.creates, 0);
+    for (const [vercelEnv, url, expectedMessage] of [
+      ["production", "https://example.invalid/api/payments/prasmul/callback/qris", /production webhook URL/],
+      ["production", "https://swapitproject.web.id/api/payments/prasmul/callback/qris", /unique payment order index/],
+      ["preview", "https://example.invalid/api/payments/prasmul/callback/qris", /unique payment order index/],
+    ]) {
+      process.env.VERCEL_ENV = vercelEnv;
+      process.env.PRASMUL_WEBHOOK_URL = url;
+      setupPayment(null);
+      globalThis.__paymentTest.indexes = [];
+      const response = await POST(makeRequest("POST"));
+      assert.equal(response.status, 503);
+      assert.match((await response.json()).message, expectedMessage);
+      assert.equal(globalThis.__paymentTest.localCreates, 0);
+      assert.equal(globalThis.__paymentTest.creates, 0);
+    }
   } finally {
-    setTestConfirmation(false);
+    for (const key of keys) {
+      if (previous[key] === undefined) delete process.env[key];
+      else process.env[key] = previous[key];
+    }
   }
 });
 
@@ -327,7 +388,6 @@ test("mocked enabled route refuses creation without a verified unique index", as
   process.env.PRASMUL_WEBHOOK_URL = "https://example.invalid/api/payments/prasmul/callback/qris";
   setupPayment(null);
   globalThis.__paymentTest.indexes = [];
-  setTestConfirmation(true);
   try {
     const response = await POST(makeRequest("POST"));
     assert.equal(response.status, 503);
@@ -336,7 +396,22 @@ test("mocked enabled route refuses creation without a verified unique index", as
     assert.equal(globalThis.__paymentTest.lookups, 0);
     assert.equal(globalThis.__paymentTest.creates, 0);
   } finally {
-    setTestConfirmation(false);
+    delete process.env.PRASMUL_WEBHOOK_URL;
+  }
+});
+
+test("mocked enabled route refuses creation without a confirmed expiry time zone", async () => {
+  process.env.PAYMENT_PROVIDER = "PRASMUL";
+  process.env.PRASMUL_WEBHOOK_URL = "https://example.invalid/api/payments/prasmul/callback/qris";
+  delete process.env.PRASMUL_TIME_ZONE;
+  setupPayment(null);
+  try {
+    const response = await POST(makeRequest("POST"));
+    assert.equal(response.status, 503);
+    assert.match((await response.json()).message, /time zone/);
+    assert.equal(globalThis.__paymentTest.localCreates, 0);
+    assert.equal(globalThis.__paymentTest.creates, 0);
+  } finally {
     delete process.env.PRASMUL_WEBHOOK_URL;
   }
 });
@@ -348,32 +423,22 @@ test("mocked enabled route refuses to recreate an existing order after provider 
     prasmulOrderId: `PRASMUL-${orderId}`, status: "PENDING",
   });
   globalThis.__paymentTest.lookupError = "not-found";
-  setTestConfirmation(true);
-  try {
-    const responses = await Promise.all([POST(makeRequest("POST")), POST(makeRequest("POST"))]);
-    assert.deepEqual(responses.map((response) => response.status), [409, 409]);
-    assert.equal(globalThis.__paymentTest.lookups, 2);
-    assert.equal(globalThis.__paymentTest.creates, 0);
-    assert.equal(globalThis.__paymentTest.localCreates, 0);
-  } finally {
-    setTestConfirmation(false);
-  }
+  const responses = await Promise.all([POST(makeRequest("POST")), POST(makeRequest("POST"))]);
+  assert.deepEqual(responses.map((response) => response.status), [409, 409]);
+  assert.equal(globalThis.__paymentTest.lookups, 2);
+  assert.equal(globalThis.__paymentTest.creates, 0);
+  assert.equal(globalThis.__paymentTest.localCreates, 0);
 });
 
 test("mocked enabled route rejects missing or mismatched stored references", async () => {
   process.env.PAYMENT_PROVIDER = "PRASMUL";
   setupPayment({ ...stored, _id: orderId, orderId, provider: "PRASMUL", status: "PENDING" });
-  setTestConfirmation(true);
-  try {
-    for (const reference of [undefined, "unrelated-reference"]) {
-      globalThis.__paymentTest.payment.prasmulOrderId = reference;
-      assert.equal((await POST(makeRequest("POST"))).status, 409);
-    }
-    assert.equal(globalThis.__paymentTest.lookups, 0);
-    assert.equal(globalThis.__paymentTest.creates, 0);
-  } finally {
-    setTestConfirmation(false);
+  for (const reference of [undefined, "unrelated-reference"]) {
+    globalThis.__paymentTest.payment.prasmulOrderId = reference;
+    assert.equal((await POST(makeRequest("POST"))).status, 409);
   }
+  assert.equal(globalThis.__paymentTest.lookups, 0);
+  assert.equal(globalThis.__paymentTest.creates, 0);
 });
 
 test("mocked enabled route saves mismatched amount even when expiry zone is unknown", async () => {
@@ -387,17 +452,12 @@ test("mocked enabled route saves mismatched amount even when expiry zone is unkn
     ...remote, order_id: `PRASMUL-${orderId}`, amount: 358621,
     expired_payment: "2026-11-20 | 14:48:09", payment_code: "test-qr", qr_string: "conflicting-test-qr",
   };
-  setTestConfirmation(true);
-  try {
-    const response = await POST(makeRequest("POST"));
-    assert.equal(response.status, 409);
-    assert.match((await response.json()).message, /manual reconciliation/);
-    assert.equal(globalThis.__paymentTest.payment.prasmulAmount, 358621);
-    assert.equal(globalThis.__paymentTest.payment.paymentData.prasmulExpiredPaymentRaw, "2026-11-20 | 14:48:09");
-    assert.equal(globalThis.__paymentTest.payment.prasmulExpiredPayment, undefined);
-  } finally {
-    setTestConfirmation(false);
-  }
+  const response = await POST(makeRequest("POST"));
+  assert.equal(response.status, 409);
+  assert.match((await response.json()).message, /manual reconciliation/);
+  assert.equal(globalThis.__paymentTest.payment.prasmulAmount, 358621);
+  assert.equal(globalThis.__paymentTest.payment.paymentData.prasmulExpiredPaymentRaw, "2026-11-20 | 14:48:09");
+  assert.equal(globalThis.__paymentTest.payment.prasmulExpiredPayment, undefined);
 });
 
 test("mocked enabled route accepts a matching future expiry and hides expired or unzoned QR", async () => {
@@ -411,14 +471,19 @@ test("mocked enabled route accepts a matching future expiry and hides expired or
     ...remote, order_id: `PRASMUL-${orderId}`, payment_code: "test-qr",
     expired_payment: future.toISOString().slice(0, 19).replace("T", " | "),
   };
-  setTestConfirmation(true);
+  const orderExpiry = new Date(Date.now() + 60000);
+  globalThis.__paymentTest.order.expiresAt = orderExpiry;
   try {
     let response = await POST(makeRequest("POST"));
     assert.equal(response.status, 200);
-    assert.equal((await response.json()).data.grossAmount, 358620);
+    const created = (await response.json()).data;
+    assert.equal(created.grossAmount, 358620);
+    assert.equal(created.expiredPayment, orderExpiry.toISOString());
     assert.equal(globalThis.__paymentTest.payment.paymentData.prasmulPartnerOrderId, "test-provider-reference");
     response = await GET(makeRequest("GET"));
-    assert.equal((await response.json()).data[0].qrString, "test-qr");
+    const current = (await response.json()).data[0];
+    assert.equal(current.qrString, "test-qr");
+    assert.equal(current.expiredPayment, orderExpiry.toISOString());
 
     globalThis.__paymentTest.remote.expired_payment = new Date(Date.now() - 60000).toISOString();
     response = await POST(makeRequest("POST"));
@@ -439,7 +504,6 @@ test("mocked enabled route accepts a matching future expiry and hides expired or
     assert.equal(unzoned.expiredPayment, undefined);
     assert.equal(unzoned.verificationStatus, "PENDING");
   } finally {
-    setTestConfirmation(false);
     delete process.env.PRASMUL_TIME_ZONE;
   }
 });
@@ -477,12 +541,25 @@ test("isolated MongoDB unique index prevents concurrent duplicate PRASMUL create
     await mongoose.connect(uri, { autoIndex: false, serverSelectionTimeoutMS: 10000 });
 
     const { default: realPayment } = await import("../src/models/Payment.ts");
+    const { default: realOrder } = await import("../src/models/Order.ts");
     await realPayment.createIndexes();
+    const buyerId = new mongoose.Types.ObjectId("507f1f77bcf86cd799439012");
+    for (const id of [orderId, "507f1f77bcf86cd799439013", "507f1f77bcf86cd799439014"]) {
+      await realOrder.collection.insertOne({
+        _id: new mongoose.Types.ObjectId(id),
+        buyerId,
+        status: "PENDING_PAYMENT",
+        totalAmount: 358620,
+        expiresAt: future,
+      });
+    }
     assert.equal(hasUniquePaymentOrderIndex(await realPayment.collection.indexes()), true);
     process.env.PAYMENT_PROVIDER = "PRASMUL";
-    process.env.PRASMUL_WEBHOOK_URL = "https://example.invalid/api/payments/prasmul/webhook";
+    process.env.PRASMUL_WEBHOOK_URL = "https://example.invalid/api/payments/prasmul/callback/qris";
+    process.env.PRASMUL_TIME_ZONE = "UTC";
     setupPayment(null);
     globalThis.__paymentTest.realModel = realPayment;
+    globalThis.__paymentTest.realOrderModel = realOrder;
     globalThis.__paymentTest.fakeProvider = true;
     globalThis.__paymentTest.order.buyerId = "507f1f77bcf86cd799439012";
     globalThis.__paymentTest.auth.user.id = globalThis.__paymentTest.order.buyerId;
@@ -490,7 +567,6 @@ test("isolated MongoDB unique index prevents concurrent duplicate PRASMUL create
       ...remote, order_id: `PRASMUL-${orderId}`, payment_code: "test-qr",
       expired_payment: future.toISOString(),
     };
-    setTestConfirmation(true);
     const responses = await Promise.all([POST(makeRequest("POST")), POST(makeRequest("POST"))]);
     assert.ok(responses.some((response) => response.status === 200));
     assert.ok(responses.every((response) => response.status === 200 || response.status === 409));
@@ -502,19 +578,22 @@ test("isolated MongoDB unique index prevents concurrent duplicate PRASMUL create
     const secondOrderId = "507f1f77bcf86cd799439013";
     setupPayment(null);
     globalThis.__paymentTest.realModel = realPayment;
+    globalThis.__paymentTest.realOrderModel = realOrder;
     globalThis.__paymentTest.fakeProvider = true;
     globalThis.__paymentTest.failDetailAfterCreate = true;
     globalThis.__paymentTest.order._id = secondOrderId;
     globalThis.__paymentTest.order.buyerId = "507f1f77bcf86cd799439012";
     globalThis.__paymentTest.auth.user.id = globalThis.__paymentTest.order.buyerId;
     globalThis.__paymentTest.createdOrder = {
-      order_id: `PRASMUL-${secondOrderId}`, qr_id: "qr-id", basic_price: 350000,
+      order_id: `PRASMUL-${secondOrderId}`, qr_id: "qr-id-2", basic_price: 350000,
       amount: 358620, status: "Belum Lunas", expired_payment: "2026-11-20 | 14:48:09",
       partner_order_id: "test-provider-reference", payment_code: "test-qr",
     };
     assert.equal((await POST(makeRequest("POST", secondOrderId))).status, 502);
     const saved = await realPayment.findOne({ orderId: secondOrderId }).lean();
     assert.equal(saved.paymentData.prasmulCreateResponse.amount, 358620);
+    assert.equal(saved.prasmulAmount, 358620);
+    assert.equal(saved.prasmulPaymentCode, "test-qr");
     assert.equal(saved.paymentData.prasmulCreateResponse.orderId, `PRASMUL-${secondOrderId}`);
     assert.equal(saved.paymentData.prasmulCreateResponse.partnerOrderId, "test-provider-reference");
     assert.equal(saved.paymentData.prasmulCreateResponse.payment_code, undefined);
@@ -524,12 +603,13 @@ test("isolated MongoDB unique index prevents concurrent duplicate PRASMUL create
     const thirdOrderId = "507f1f77bcf86cd799439014";
     setupPayment(null);
     globalThis.__paymentTest.realModel = realPayment;
+    globalThis.__paymentTest.realOrderModel = realOrder;
     globalThis.__paymentTest.fakeProvider = true;
     globalThis.__paymentTest.order._id = thirdOrderId;
     globalThis.__paymentTest.order.buyerId = "507f1f77bcf86cd799439012";
     globalThis.__paymentTest.auth.user.id = globalThis.__paymentTest.order.buyerId;
     globalThis.__paymentTest.createdOrder = {
-      order_id: `PRASMUL-${thirdOrderId}`, qr_id: "qr-id", basic_price: 350000,
+      order_id: `PRASMUL-${thirdOrderId}`, qr_id: "qr-id-3", basic_price: 350000,
       amount: 358621, status: "Belum Lunas", expired_payment: future.toISOString(),
       payment_code: "test-qr",
     };
@@ -541,9 +621,29 @@ test("isolated MongoDB unique index prevents concurrent duplicate PRASMUL create
     assert.equal(mismatchedPayment.prasmulPaymentCode, undefined);
     assert.equal(globalThis.__paymentTest.lookups, 1);
     assert.equal(globalThis.__paymentTest.creates, 1);
+
+    const cancelledOrderId = "507f1f77bcf86cd799439015";
+    await realOrder.collection.insertOne({
+      _id: new mongoose.Types.ObjectId(cancelledOrderId),
+      buyerId,
+      status: "CANCELLED",
+      totalAmount: 358620,
+      expiresAt: future,
+    });
+    setupPayment(null);
+    globalThis.__paymentTest.realModel = realPayment;
+    globalThis.__paymentTest.realOrderModel = realOrder;
+    globalThis.__paymentTest.fakeProvider = true;
+    globalThis.__paymentTest.order._id = cancelledOrderId;
+    globalThis.__paymentTest.order.buyerId = buyerId.toString();
+    globalThis.__paymentTest.auth.user.id = buyerId.toString();
+    assert.equal((await POST(makeRequest("POST", cancelledOrderId))).status, 409);
+    assert.equal(await realPayment.countDocuments({ orderId: cancelledOrderId }), 0);
+    assert.equal(globalThis.__paymentTest.lookups, 0);
+    assert.equal(globalThis.__paymentTest.creates, 0);
   } finally {
-    setTestConfirmation(false);
     delete process.env.PRASMUL_WEBHOOK_URL;
+    delete process.env.PRASMUL_TIME_ZONE;
     delete globalThis.__paymentTest.realModel;
     await mongoose.disconnect();
     if (connection) await connection.close();
@@ -551,8 +651,9 @@ test("isolated MongoDB unique index prevents concurrent duplicate PRASMUL create
   }
 });
 
-test("main endpoint blocks concurrent new PRASMUL creation and retries without remote requests", async () => {
+test("main endpoint blocks creation without a callback URL", async () => {
   process.env.PAYMENT_PROVIDER = "PRASMUL";
+  delete process.env.PRASMUL_WEBHOOK_URL;
   setupPayment(null);
   const responses = await Promise.all([POST(makeRequest("POST")), POST(makeRequest("POST")), POST(makeRequest("POST"))]);
   assert.deepEqual(responses.map((response) => response.status), [503, 503, 503]);
@@ -560,7 +661,7 @@ test("main endpoint blocks concurrent new PRASMUL creation and retries without r
   assert.equal(globalThis.__paymentTest.lookups, 0);
 });
 
-test("main endpoint hides PRASMUL QR until confirmation is implemented", async () => {
+test("main endpoint displays an independently verified existing QR and finalizes verified payment", async () => {
   process.env.PAYMENT_PROVIDER = "PRASMUL";
   setupPayment({
     ...stored, _id: orderId, orderId, userId: "buyer", provider: "PRASMUL",
@@ -569,16 +670,17 @@ test("main endpoint hides PRASMUL QR until confirmation is implemented", async (
   });
   let response = await GET(makeRequest("GET"));
   let payment = (await response.json()).data[0];
-  assert.equal(payment.qrString, undefined);
+  assert.equal(payment.qrString, "test-qr");
   assert.equal(payment.verificationStatus, "PENDING");
   assert.equal(payment.prasmulPaymentCode, undefined);
   assert.equal(payment.paymentData, undefined);
   globalThis.__paymentTest.remote.status = "Lunas";
   response = await GET(makeRequest("GET"));
   payment = (await response.json()).data[0];
-  assert.equal(payment.status, "PENDING");
-  assert.equal(payment.verificationStatus, "UNKNOWN");
+  assert.equal(payment.status, "PAID");
+  assert.equal(payment.verificationStatus, "PAID");
   assert.equal(payment.qrString, undefined);
+  globalThis.__paymentTest.payment.status = "PENDING";
   globalThis.__paymentTest.lookupError = true;
   response = await GET(makeRequest("GET"));
   payment = (await response.json()).data[0];
@@ -587,23 +689,36 @@ test("main endpoint hides PRASMUL QR until confirmation is implemented", async (
   assert.equal(globalThis.__paymentTest.creates, 0);
 });
 
-test("repeated polling of pending and unknown statuses never finalizes payment", async () => {
+test("polling finalizes Lunas and leaves other statuses pending", async () => {
   process.env.PAYMENT_PROVIDER = "PRASMUL";
-  setupPayment({
-    ...stored, _id: orderId, orderId, userId: "buyer", provider: "PRASMUL",
-    status: "PENDING", prasmulPaymentCode: "test-qr", prasmulExpiredPayment: future,
-  });
   for (const status of ["Belum Lunas", "Lunas", "Expired"]) {
+    setupPayment({
+      ...stored, _id: orderId, orderId, userId: "buyer", provider: "PRASMUL",
+      status: "PENDING", prasmulPaymentCode: "test-qr", prasmulExpiredPayment: future,
+    });
     globalThis.__paymentTest.remote.status = status;
     const responses = await Promise.all([GET(makeRequest("GET")), GET(makeRequest("GET"))]);
     for (const response of responses) {
       const payment = (await response.json()).data[0];
-      assert.equal(payment.status, "PENDING");
-      assert.equal(payment.verificationStatus, status === "Belum Lunas" ? "PENDING" : "UNKNOWN");
+      assert.equal(payment.status, status === "Lunas" ? "PAID" : "PENDING");
+      assert.equal(payment.verificationStatus, status === "Belum Lunas" ? "PENDING" : status === "Lunas" ? "PAID" : "UNKNOWN");
     }
+    assert.equal(globalThis.__paymentTest.mutations, status === "Lunas" ? 1 : 0);
   }
-  assert.equal(globalThis.__paymentTest.lookups, 6);
-  assert.equal(globalThis.__paymentTest.mutations, 0);
+});
+
+test("polling reports reconciliation when a verified payment cannot be finalized", async () => {
+  setupPayment({
+    ...stored, _id: orderId, orderId, userId: "buyer", provider: "PRASMUL",
+    status: "PENDING",
+  });
+  globalThis.__paymentTest.remote.status = "Lunas";
+  globalThis.__paymentTest.finalizationError = true;
+  const response = await GET(makeRequest("GET"));
+  const payment = (await response.json()).data[0];
+  assert.equal(payment.status, "PENDING");
+  assert.equal(payment.verificationStatus, "UNKNOWN");
+  assert.match(payment.verificationMessage, /reconciliation/);
 });
 
 test("mismatched provider amounts remain unverified and do not expose stored QR", async () => {
@@ -620,6 +735,18 @@ test("mismatched provider amounts remain unverified and do not expose stored QR"
   assert.equal(payment.prasmulPaymentCode, undefined);
 });
 
+test("existing QR is hidden if provider detail does not verify its QR identity", async () => {
+  setupPayment({
+    ...stored, _id: orderId, orderId, userId: "buyer", provider: "PRASMUL",
+    status: "PENDING", prasmulPaymentCode: "test-qr", prasmulExpiredPayment: future,
+  });
+  delete globalThis.__paymentTest.remote.qr_id;
+  const response = await GET(makeRequest("GET"));
+  const payment = (await response.json()).data[0];
+  assert.equal(payment.verificationStatus, "PENDING");
+  assert.equal(payment.qrString, undefined);
+});
+
 test("payment endpoints reject unauthenticated callers", async () => {
   process.env.PAYMENT_PROVIDER = "PRASMUL";
   setupPayment(null);
@@ -631,16 +758,17 @@ test("payment endpoints reject unauthenticated callers", async () => {
   assert.equal((await GET(makeRequest("GET"))).status, 401);
 });
 
-test("unverified webhook refuses delivery without processing payment", async () => {
+test("legacy webhook uses the QRIS callback handler", async () => {
   const response = await postWebhook(new Request("http://localhost/api/payments/prasmul/webhook", {
     method: "POST",
     body: "untrusted-event",
   }));
-  assert.equal(response.status, 503);
+  assert.equal(response.status, 415);
   assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.equal(postWebhook, postQrisCallback);
 });
 
-test("QRIS callback refuses unverified and repeated payloads without payment side effects", async () => {
+test("QRIS callback rejects invalid payloads without payment side effects", async () => {
   const previous = process.env.PRASMUL_QRIS_CALLBACK_TEST_MODE;
   delete process.env.PRASMUL_QRIS_CALLBACK_TEST_MODE;
   setupPayment(null);
@@ -655,7 +783,7 @@ test("QRIS callback refuses unverified and repeated payloads without payment sid
         method: "POST",
         body,
       }));
-      assert.equal(response.status, 503);
+      assert.equal(response.status, 415);
       assert.equal(response.headers.get("cache-control"), "no-store");
       assert.equal((await response.json()).success, false);
     }
@@ -698,6 +826,11 @@ test("QRIS callback test mode validates sample payloads without processing payme
         message: "Test payload accepted; no payment was processed.",
       });
     }
+    const mixedCase = JSON.stringify({
+      event: "qr.payment",
+      data: { ...data, reference_id: `PrAsMuL-${orderId}` },
+    });
+    assert.equal((await postQrisCallback(request(mixedCase))).status, 200);
     const invalid = [
       "not-json",
       JSON.stringify(null),
@@ -711,6 +844,8 @@ test("QRIS callback test mode validates sample payloads without processing payme
         { status: "PENDING" },
         { amount: "157050" },
         { amount: null },
+        { amount: 1.5 },
+        { amount: Number.MAX_SAFE_INTEGER + 1 },
       ].map((change) => JSON.stringify({ event: "qr.payment", data: { ...data, ...change } })),
       '{"event":"qr.payment","data":{"id":"test","reference_id":"PRASMUL-test","status":"COMPLETED","amount":1e309}}',
     ];
@@ -721,7 +856,7 @@ test("QRIS callback test mode validates sample payloads without processing payme
     }
     assert.equal((await postQrisCallback(request(body, "text/plain"))).status, 415);
     process.env.NODE_ENV = "production";
-    assert.equal((await postQrisCallback(request(body))).status, 503);
+    assert.equal((await postQrisCallback(request(body))).status, 409);
     assert.equal(globalThis.__paymentTest.lookups, 0);
     assert.equal(globalThis.__paymentTest.creates, 0);
     assert.equal(globalThis.__paymentTest.mutations, 0);

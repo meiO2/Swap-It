@@ -26,7 +26,8 @@ type Payment = {
   prasmulQrId?: string;
   prasmulPaymentCode?: string;
   expiredPayment?: string;
-  verificationStatus?: "PENDING" | "UNKNOWN";
+  verificationStatus?: "PENDING" | "PAID" | "UNKNOWN";
+  verificationMessage?: string;
   redirectUrl?: string;
   testMode?: boolean;
 };
@@ -121,6 +122,7 @@ export default function PaymentPage() {
     let active = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let attempts = 0;
+    let isPrasmul = false;
     const requestedOrderId = orderId;
 
     async function checkStatus(onlyIfExisting = false) {
@@ -141,6 +143,8 @@ export default function PaymentPage() {
           if (onlyIfExisting) return;
           throw new Error("Payment record was not found.");
         }
+        isPrasmul = current.provider === "PRASMUL";
+        if (current.status === "PAID" || (isPrasmul && current.qrString)) setError("");
 
         setPayment({
           ...current,
@@ -151,14 +155,15 @@ export default function PaymentPage() {
         setStatusError(
           current.provider === "PRASMUL" &&
             current.verificationStatus === "UNKNOWN"
-            ? "Payment requires verification. Do not pay again."
+            ? current.verificationMessage ?? "Payment requires verification. Do not pay again."
             : "",
         );
 
-        if (current.status === "PENDING" && attempts < 60) {
-          timer = setTimeout(() => void checkStatus(), 5000);
-        } else if (current.status === "PENDING") {
-          setPollingTimedOut(true);
+        if (current.status === "PENDING") {
+          if (attempts >= 60) setPollingTimedOut(true);
+          if (attempts < 60 || current.provider === "PRASMUL") {
+            timer = setTimeout(() => void checkStatus(), attempts < 60 ? 5000 : 30000);
+          }
         }
       } catch (cause) {
         if (!active) return;
@@ -169,8 +174,9 @@ export default function PaymentPage() {
             : "Could not load payment status.",
         );
 
-        if (!onlyIfExisting && attempts < 60) {
-          timer = setTimeout(() => void checkStatus(), 5000);
+        if (!onlyIfExisting && (attempts < 60 || isPrasmul)) {
+          if (attempts >= 60) setPollingTimedOut(true);
+          timer = setTimeout(() => void checkStatus(), attempts < 60 ? 5000 : 30000);
         } else if (!onlyIfExisting) {
           setPollingTimedOut(true);
         }
@@ -199,6 +205,7 @@ export default function PaymentPage() {
           window.location.assign(result.redirectUrl);
           return;
         }
+        isPrasmul = result.provider === "PRASMUL";
 
         setPayment({
           ...result,
@@ -343,7 +350,9 @@ export default function PaymentPage() {
                   {pollingTimedOut
                     ? `Confirmation is taking longer than expected. Do not pay again; the status will update when ${
                         payment.provider === "PRASMUL" ? "PRASMUL" : "Xendit"
-                      } confirms the payment.`
+                      } confirms the payment.${
+                        payment.provider === "PRASMUL" ? " We will continue checking while this page is open." : ""
+                      }`
                     : "No need to check manually. We are checking the payment status automatically."}
                 </p>
               )}

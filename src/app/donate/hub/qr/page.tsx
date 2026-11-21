@@ -141,7 +141,7 @@ function QrContent() {
 
         {scanConfirmed && (
           <div aria-live="polite" className="mt-4 flex min-h-11 items-center justify-center gap-2 rounded-full bg-hub-mint px-4 text-xs font-medium text-hub-primary">
-            <Check size={16} /> QR successfully scanned by the physical Hub
+            <Check size={16} /> QR access verified. Physical door position is not confirmed.
           </div>
         )}
 
@@ -176,7 +176,7 @@ function QrContent() {
             <p className="mt-4 flex items-center gap-3 px-1 text-xs leading-relaxed text-hub-muted"><Phone size={20} className="shrink-0 text-hub-primary" /> Hold your phone up to the scanner on the Swap Hub.</p>
             <div aria-live="polite" className="mt-4 flex min-h-11 items-center justify-center gap-2 rounded-full bg-hub-mint px-4 text-xs font-medium text-hub-primary">
               {scanConfirmed ? <Check size={16} /> : <RefreshCw size={15} className="animate-spin" />}
-              {scanConfirmed ? "QR successfully scanned" : "Waiting for physical Hub scanner…"}
+              {scanConfirmed ? "QR access verified" : "Waiting for Hub access verification…"}
             </div>
           </>
         )}

@@ -53,6 +53,10 @@
         }
 
         const { token } = body as HubScanRequest;
+        const remoteUnlock = (body as HubScanRequest).remoteUnlock;
+        if (remoteUnlock !== undefined && typeof remoteUnlock !== "boolean") {
+        return errorResponse("Invalid remote unlock request.", 400);
+        }
         const normalizedToken = token.trim();
 
         if (!normalizedToken || normalizedToken.length > 200) {
@@ -76,6 +80,10 @@
         );
         }
 
+        if (remoteUnlock && accessToken.activity !== "DONATION") {
+        return errorResponse("Remote scanning is only available for donations.", 400);
+        }
+
         // Verify donation eligibility.
         if (accessToken.activity === "DONATION") {
         const donation = await Donation.findOne({
@@ -92,6 +100,8 @@
 
         if (accessToken.activity === "DONATION" && accessToken.donationSessionId) {
             const transaction = await mongoose.startSession();
+            const remoteSessionId = new mongoose.Types.ObjectId();
+            const remoteExpiresAt = new Date(Date.now() + 30_000);
             let deviceSession: Awaited<ReturnType<typeof HubDeviceSession.create>>[number] | undefined;
             try {
                 await transaction.withTransaction(async () => {
@@ -121,13 +131,20 @@
                             userId: consumedToken.userId,
                             hubId: device.hubId,
                             status: "SESSION_CREATED",
+                            $or: [
+                                { remoteUnlockPending: { $exists: false } },
+                                { "remoteUnlockPending.expiresAt": { $lte: new Date() } },
+                            ],
                         },
-                        { $set: { status: "QR_SCANNED" } },
+                        remoteUnlock
+                            ? { $set: { remoteUnlockPending: { sessionId: remoteSessionId, expiresAt: remoteExpiresAt } } }
+                            : { $set: { status: "QR_SCANNED" }, $unset: { remoteUnlockPending: 1 } },
                         { new: true, session: transaction },
                     ).lean();
                     if (!donation) throw new HubScanConflict("Donation session is no longer valid.");
 
                     const createdSessions = await HubDeviceSession.create([{
+                        ...(remoteUnlock ? { _id: remoteSessionId } : {}),
                         deviceId: device.deviceId,
                         hubId: device.hubId,
                         accessTokenId: consumedToken._id,
@@ -136,6 +153,12 @@
                         state: "AUTHORIZED",
                         itemDetected: false,
                         events: [],
+                        ...(remoteUnlock ? {
+                            remoteUnlock: {
+                                status: "PENDING" as const,
+                                expiresAt: remoteExpiresAt,
+                            },
+                        } : {}),
                     }], { session: transaction });
                     deviceSession = createdSessions[0];
                 });

@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart Locker QR Scanner (Webcam)</title>
+  <style>
+    body { font-family: 'Segoe UI', sans-serif; background: #f0f4f8; color: #001351; display: flex; justify-content: center; padding: 24px; margin: 0; }
+    .card { background: #fff; border-radius: 16px; box-shadow: 0 8px 24px rgba(0,19,81,0.08); max-width: 440px; width: 100%; padding: 24px; text-align: center; }
+    h2 { margin-top: 0; font-size: 20px; }
+    .status { padding: 14px; border-radius: 12px; background: #f8fafc; border: 1px solid #e2e8f0; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>Smart Locker QR Scanner</h2>
+    <p>Scanner sekarang menggunakan aplikasi SwapIt dan login ADMIN. Token QR diverifikasi melalui backend, bukan dikirim langsung ke alamat HTTP ESP32.</p>
+    <div class="status">
+      <a href="http://localhost:3000/admin/hubs/scanner">Buka scanner localhost</a>
+      <br><br>
+      <a href="https://www.swapitproject.web.id/admin/hubs/scanner">Buka scanner SwapIt</a>
+    </div>
+    <p>Relay fisik memerlukan firmware dan konfigurasi perangkat yang sesuai. Halaman ini tidak membuka pintu.</p>
+  </div>
+</body>
+</html>

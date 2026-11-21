@@ -30,6 +30,20 @@ function getPrasmulConfig() {
   };
 }
 
+export function assertPrasmulConfigured(): void {
+  const { baseUrl } = getPrasmulConfig();
+  if (!URL.canParse(baseUrl)) {
+    throw new Error("PRASMUL base URL is invalid.");
+  }
+  const url = new URL(baseUrl);
+  if (
+    (process.env.NODE_ENV === "production" && url.protocol !== "https:") ||
+    url.username || url.password || url.search || url.hash
+  ) {
+    throw new Error("PRASMUL base URL is invalid.");
+  }
+}
+
 export class PrasmulApiError extends Error {
   status: number;
 
@@ -225,9 +239,6 @@ export function parsePrasmulExpiry(value: string, timeZone?: string): Date {
   return new Date(matches[0]);
 }
 
-// The tutorial does not yet establish the Orders endpoint or amount semantics.
-const PRASMUL_CREATE_CONTRACT_VERIFIED = false;
-
 async function prasmulGet<T>(path: string): Promise<T> {
   const { baseUrl } = getPrasmulConfig();
   let token = await getPrasmulToken();
@@ -391,9 +402,6 @@ export type CreatePrasmulQrResult = {
 export async function createPrasmulQrOrder(
   input: CreatePrasmulQrInput,
 ): Promise<CreatePrasmulQrResult> {
-  if (!PRASMUL_CREATE_CONTRACT_VERIFIED) {
-    throw new Error("PRASMUL order creation contract is not verified.");
-  }
   const { orderId, targetAmount, description, webhookUrl } = input;
 
   if (!orderId.trim()) {
@@ -408,9 +416,6 @@ export async function createPrasmulQrOrder(
   const estimate = calculatePrasmulBasicPrice(targetAmount);
 
   const { baseUrl } = getPrasmulConfig();
-  if (isDigitalCity(baseUrl)) {
-    throw new Error("Digital City order creation contract is not verified.");
-  }
   const token = await getPrasmulToken();
 
   const response = await fetch(`${baseUrl}/api/partners/orders/`, {
@@ -447,7 +452,8 @@ export async function createPrasmulQrOrder(
 
   // Pastikan transaksi yang dikembalikan sesuai request.
   if (
-    remoteOrder.order_id !== orderId ||
+    typeof remoteOrder.order_id !== "string" ||
+    remoteOrder.order_id.toLowerCase() !== orderId.toLowerCase() ||
     (remoteOrder.payment_method !== undefined &&
       remoteOrder.payment_method !== "QRIS") ||
     remoteOrder.basic_price !== estimate.basicPrice

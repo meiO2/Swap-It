@@ -192,9 +192,8 @@ PAYMENT_PROVIDER=XENDIT
 PRASMUL_BASE_URL=https://digitalcity.id
 PRASMUL_EMAIL=...
 PRASMUL_PASSWORD=...
-PRASMUL_WEBHOOK_URL=https://<your-domain>/api/payments/prasmul/webhook
-# Set only after the provider confirms the time zone, e.g. an IANA zone.
-# PRASMUL_TIME_ZONE=<provider-confirmed-IANA-time-zone>
+PRASMUL_WEBHOOK_URL=https://swapitproject.web.id/api/payments/prasmul/callback/qris
+PRASMUL_TIME_ZONE=Asia/Jakarta
 
 SHIPPING_MODE=mock
 BITESHIP_API_KEY=...
@@ -214,33 +213,58 @@ CLOUDINARY_API_SECRET=...
 - `OTP_SECRET` signs email-verification OTP data.
 - `PAYMENT_PROVIDER` selects `XENDIT` (default) or `PRASMUL`; invalid values
   reject payment creation. PRASMUL credentials are server-only. Selecting
-  PRASMUL does not enable new payments: creation and QR display are disabled
-  until verified confirmation and lifecycle handling are implemented.
+  PRASMUL uses the supplied create contract; a provider-confirmed expiry time
+  zone and a unique payment order index are required before creation.
+  PRASMUL QR codes are displayed only after provider, amount, order and
+  expiry checks succeed.
 - The previously supplied Digital City tutorial summary identifies the login
   path, `PRASMUL-` reference prefix, `webhook_url` and `qr_string`. Set
   `PRASMUL_BASE_URL` explicitly;
-  the legacy login remains in use for other configured hosts. The Orders
-  create endpoint, request amount semantics and response shape still need
-  provider confirmation. Existing payments can be checked using the legacy
-  order-detail path, but successful and expired statuses are not yet verified.
-  Polling is the intended confirmation method; callbacks do not finalize
-  payments. The Postman collection's legacy `/api/partners/orders/` create
-  payload uses `callback_url`; it is not evidence that the Digital City
-  tutorial's `webhook_url` works on that endpoint. Digital City creation
-  remains blocked until its complete Orders contract is verified. The supplied
+  the legacy login remains in use for other configured hosts. The supplied
+  create request targets `https://digitalcity.id/api/partners/orders/` and
+  uses the Postman `callback_url` payload.
+  A supplied successful create response confirms the `status`/`data` wrapper
+  and fields including `amount`, `payment_code`, `qr_id` and `expired_payment`
+  for that transaction. Existing payments can be checked using the legacy
+  order-detail path. A supplied actual order-detail response establishes `Lunas`
+  as paid; expired and failed statuses remain unverified. The QRIS callback
+  independently checks order detail before finalizing a payment. Buyer status
+  requests also finalize a matching `Lunas` payment, using the same atomic
+  operation; no background poller runs when no client requests status.
+  The saved Postman collection uses `callback_url`; the supplied tutorial's
+  `webhook_url` is not substituted into that request. The supplied
   screen recording's sampled frames show the legacy login and Orders paths and
   an unpaid response; those frames do not establish paid or expired statuses.
-  `PRASMUL_WEBHOOK_URL` must be the application's HTTPS URL ending in
-  `/api/payments/prasmul/webhook` or `/api/payments/prasmul/callback/qris`.
-  The webhook returns 503; the QRIS callback also returns 503 by default and
-  outside development. No production callback is configured automatically.
+  Set `PRASMUL_WEBHOOK_URL` in the Vercel Production environment to
+  `https://swapitproject.web.id/api/payments/prasmul/callback/qris`.
+  Production creation rejects any other URL. Preview and development may use
+  their own HTTPS domain with the same path and no credentials, query, or fragment.
+  This repository does not configure the Vercel environment automatically.
+  In Vercel Production, also configure `PAYMENT_PROVIDER=PRASMUL`,
+  `PRASMUL_BASE_URL`, `PRASMUL_EMAIL`, `PRASMUL_PASSWORD`,
+  `PRASMUL_TIME_ZONE=Asia/Jakarta`, and `MONGODB_URI`; redeploy after changes.
+  Verify that the production domain serves the callback directly without a
+  redirect, unless PRASMUL confirms it follows redirects while preserving POST.
+  The older `/api/payments/prasmul/webhook` is an alias of the same QRIS handler,
+  not a separate provider contract. The QRIS callback is not authenticated itself;
+  it accepts the supplied example format only as a trigger, and finalizes only
+  after an authenticated order-detail lookup confirms the matching payment.
+  The official callback format and authentication remain unverified. No
+  production callback is configured automatically.
+- PRASMUL payment creation and finalization require MongoDB transactions on a
+  replica set or sharded cluster, not a standalone server. New payment creation
+  performs a local transaction before requesting a provider order. Creation and
+  QRIS callback endpoints return 503 for the known standalone transaction error;
+  verify the deployment's actual topology and transaction permissions, since a
+  connection URI alone does not establish support. Finalization failures require
+  retry or reconciliation.
 - For callback payload testing only, set `PRASMUL_QRIS_CALLBACK_TEST_MODE=true`
   on an isolated development server. `POST /api/payments/prasmul/callback/qris`
   accepts the supplied `qr.payment`/`COMPLETED` example and returns 200 with
   `mode: "TEST"`, `authenticated: false`, and `paymentProcessed: false`.
   Invalid JSON or fields return 400, and non-JSON content returns 415. This
   does not verify PRASMUL, look up a payment, or change financial data.
-  Outside development it returns 503 even if the flag is set.
+  Outside development the flag is ignored and normal verification applies.
 
   In an isolated copy without `.env` files, database connections, or production
   credentials, start the development server in PowerShell:
@@ -255,9 +279,12 @@ CLOUDINARY_API_SECRET=...
   ```powershell
   Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:3000/api/payments/prasmul/callback/qris' -ContentType 'application/json' -Body '{"event":"qr.payment","data":{"id":"simulasi-qris-icdec-01","reference_id":"PRASMUL-507f1f77bcf86cd799439011","status":"COMPLETED","amount":157050}}'
   ```
-- The provider's `YYYY-MM-DD | HH:mm:ss` expiry has no offset. Configure
-  `PRASMUL_TIME_ZONE` only after PRASMUL confirms its IANA time zone; missing,
+- The provider's `YYYY-MM-DD | HH:mm:ss` expiry has no offset. The user
+  confirmed `Asia/Jakarta` as its time zone. Configure `PRASMUL_TIME_ZONE`
+  accordingly in each deployment environment; missing,
   invalid, ambiguous, or nonexistent times cannot be used to display a QR.
+  The create flow also requires a valid configured time zone before making
+  a new provider request.
   An expiry is not evidence that the provider has marked a payment expired.
   Remote amount and expiry metadata are retained for reconciliation if the
   expiry cannot be validated. After a successful create response, its identity
@@ -280,14 +307,13 @@ CLOUDINARY_API_SECRET=...
 - Xendit dynamic QRIS transactions must be between Rp1.500 and Rp10.000.000.
 - The payment page offers a test-only simulation button when `XENDIT_SECRET_KEY`
   uses an Xendit development key. The simulation API rejects production keys.
-- Before enabling PRASMUL, obtain provider documentation and isolated sandbox
-  evidence for paid, expired and failed status values; callback payload,
+- Before using PRASMUL for live payments, obtain provider documentation and isolated sandbox
+  evidence for expired and failed status values; callback payload,
   authentication and delivery/retry behavior; reference and QR identity;
   amount, fee and rounding rules; and cancellation and reconciliation. Then
-  implement and test idempotent order, product and GP lifecycle transitions,
-  duplicate/timeout races, and provider-authenticated confirmation. Do not
-  expose existing QR codes until those checks and deployment configuration
-  have been verified.
+  test the idempotent order, product and GP lifecycle transitions,
+  duplicate/timeout races, and provider-authenticated confirmation before
+  live use.
 - `SHIPPING_MODE=mock` is the default development mode.
 - Set `SHIPPING_MODE=biteship` to use Biteship.
 - Biteship API keys must remain server-side.
@@ -435,16 +461,47 @@ Only a successful scan by a registered Hub device updates the donation to
 complete a donation: physical door events and later admin verification remain
 separate steps.
 
+#### Laptop webcam scanner and relay
+
+The ADMIN-only scanner is at `/admin/hubs/scanner`. Open it on the same origin
+as the SwapIt backend, grant webcam access, and scan the donation QR. The
+standalone `SwapHub_ESP32/scanner.html` only links to the scanner; it does not
+send a token to the ESP32 over unencrypted local HTTP.
+
+On the backend, set `HUB_SCANNER_DEVICE_ID` and `HUB_SCANNER_API_KEY` to
+the registered device ID and device API key for the intended Hub. Keep the
+key server-side; never enter it in the browser or commit it. The scanner
+verifies the QR through the existing device-authenticated scan flow and
+queues a one-time command. The device claims the command over verified HTTPS;
+expired or already claimed commands are not redelivered. The donation advances
+to `QR_SCANNED` only after the device acknowledges relay activation. If the
+response is lost, the physical result is unknown: inspect the device and issue
+a fresh QR rather than retrying the old one.
+
+`ENABLE_PHYSICAL_RELAY` in `SwapHub_ESP32/config/config.h` defaults to `0`.
+With it set to `1`, the firmware uses GPIO 21 for an active-LOW relay and
+requests HIGH after a three-second timer; remote polling replaces the
+on-device QR scanning task in that mode. Verify the actual relay wiring,
+power supply, boot/reset behavior, safe access and lock behavior before
+enabling it. Software timers alone do not guarantee a safe cutoff if the
+controller crashes or loses power; use an appropriate hardware fail-safe.
+The firmware and relay must be tested on the actual device before use.
+
+The webcam app and ESP32 must reach the same backend and database. The
+firmware currently restricts its HTTPS backend to the approved SwapIt hosts,
+so a local-only Next.js server will not control the ESP32 by itself. Backend
+and firmware changes must be deployed/flashed separately after approval.
+Without door and item sensors, relay activation does not prove that the door
+opened, closed, locked, or that an item was deposited. Do not fabricate door
+events or use the simulator to claim a physical deposit.
+
 #### Arduino dependencies and board setup
 
 1. In Arduino IDE, install **esp32 by Espressif Systems 3.x** using Boards
    Manager, then select **ESP32S3 Dev Module**. Enable OPI PSRAM and use the
    board's 16 MB flash / 8 MB PSRAM settings.
-2. Download the
-   [ESP32QRCodeReader 1.1.0 source ZIP](https://github.com/alvarowolfx/ESP32QRCodeReader)
-   and install it with **Sketch > Include Library > Add .ZIP Library**. The
-   firmware uses its bundled `quirc` decoder core only; it does not instantiate
-   the library's camera reader, so the existing JPEG camera setup and pin map
+2. The sketch includes its `quirc` decoder in `src/quirc`; it does not use a
+   separate camera reader library. The existing JPEG camera setup and pin map
    remain in use.
 3. Install **ArduinoJson** by Benoit Blanchon from Library Manager (version 6
    or newer).
@@ -497,8 +554,8 @@ deployment variables. Do not test by sharing device credentials.
 7. Verify MongoDB donation status becomes `QR_SCANNED`.
 8. Verify the QR page polls the donor-owned donation record and advances to
    `/donate/hub/insert` only after that backend status is observed.
-9. Verify no QR-scan path marks the donation as deposited or complete and no
-   lock GPIO is activated.
+9. With the default `ENABLE_PHYSICAL_RELAY=0`, verify no QR-scan path marks the
+   donation as deposited or complete and no lock GPIO is activated.
 10. Exercise invalid, expired, reused, and other-Hub QR tokens; invalid device
     credentials; Wi-Fi loss; HTTPS timeout; and duplicate camera frames.
     Expected rejections must not authorize a simulated unlock. After an

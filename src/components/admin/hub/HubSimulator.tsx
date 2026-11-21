@@ -150,6 +150,7 @@
             SwapIt operations
             </p>
             <h1 className="mt-1 text-2xl font-bold text-ink">Swap Hub Simulator</h1>
+            <a href="/admin/hubs/scanner" className="mt-2 inline-block text-sm font-semibold text-primary">Open physical Hub QR scanner</a>
             <p className="mt-2 text-sm text-ink-muted">
             Simulate QR authorization, door events, and virtual solenoid control.
             </p>

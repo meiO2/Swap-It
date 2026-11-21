@@ -17,7 +17,7 @@ type Payment = {
   grossAmount: number;
   status: PaymentStatus;
   createdAt: string;
-  verificationStatus?: "PENDING" | "UNKNOWN";
+  verificationStatus?: "PENDING" | "PAID" | "UNKNOWN";
 };
 
 function StatusIcon({ status }: { status: PaymentStatus }) {

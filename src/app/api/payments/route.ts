@@ -26,7 +26,8 @@ import {
   parsePrasmulExpiry,
   PrasmulExpiryError,
 } from "@/lib/prasmul";
-import { PRASMUL_CONFIRMATION_VERIFIED, verifyPrasmulStatus } from "@/lib/prasmul-status";
+import { verifyPrasmulStatus } from "@/lib/prasmul-status";
+import { finalizePrasmulPayment } from "@/lib/prasmul-finalization";
 import { POST as createPrasmulPayment } from "./prasmul/route";
 
 export async function POST(request: NextRequest) {
@@ -423,7 +424,7 @@ export async function GET(request: NextRequest) {
     }
 
     const responsePayments = [];
-    for (const payment of payments) {
+    for (let payment of payments) {
       if (payment.provider !== "PRASMUL") {
         responsePayments.push({
           ...payment,
@@ -433,48 +434,75 @@ export async function GET(request: NextRequest) {
         continue;
       }
 
-      const { prasmulPaymentCode, prasmulExpiredPayment, paymentData, ...safePayment } = payment;
-      void paymentData;
-      let verificationStatus: "PENDING" | "UNKNOWN" = "UNKNOWN";
+      let verificationStatus: "PENDING" | "PAID" | "UNKNOWN" =
+        payment.status === "PAID" ? "PAID" : "UNKNOWN";
+      let verificationMessage: string | undefined;
       let qrString: string | undefined;
       let expiredPayment: Date | undefined;
       if (payment.status === "PENDING" && payment.prasmulOrderId) {
         try {
           const remote = await getPrasmulOrderDetail(payment.prasmulOrderId);
           verificationStatus = verifyPrasmulStatus(payment, remote);
-          try {
-            const remoteExpiry = parsePrasmulExpiry(remote.expired_payment, process.env.PRASMUL_TIME_ZONE);
-            if (remoteExpiry.getTime() === prasmulExpiredPayment?.getTime()) {
-              expiredPayment = remoteExpiry;
+          if (verificationStatus === "PAID") {
+            await finalizePrasmulPayment(payment);
+            const refreshed = await Payment.findById(payment._id).lean();
+            if (!refreshed || refreshed.status !== "PAID") {
+              throw new Error("PRASMUL payment finalization could not be confirmed.");
             }
-          } catch (error) {
-            if (!(error instanceof PrasmulExpiryError)) throw error;
-            console.warn("Could not validate PRASMUL expiry.", payment._id.toString());
+            payment = refreshed;
+          }
+          if (verificationStatus === "PENDING") {
+            try {
+              const remoteExpiry = parsePrasmulExpiry(remote.expired_payment, process.env.PRASMUL_TIME_ZONE);
+              if (remoteExpiry.getTime() === payment.prasmulExpiredPayment?.getTime()) {
+                expiredPayment = remoteExpiry;
+              }
+            } catch (error) {
+              if (!(error instanceof PrasmulExpiryError)) throw error;
+              console.warn("Could not validate PRASMUL expiry.", payment._id.toString());
+            }
           }
           if (
-            PRASMUL_CONFIRMATION_VERIFIED &&
             orderId &&
             verificationStatus === "PENDING" &&
-            prasmulPaymentCode &&
-            getPrasmulQrString(remote) === prasmulPaymentCode &&
+            payment.prasmulQrId &&
+            remote.qr_id === payment.prasmulQrId &&
+            payment.prasmulPaymentCode &&
+            getPrasmulQrString(remote) === payment.prasmulPaymentCode &&
             expiredPayment &&
-            expiredPayment.getTime() > Date.now() &&
-            await Order.exists({
+            expiredPayment.getTime() > Date.now()
+          ) {
+            const availableOrder = await Order.findOne({
               _id: payment.orderId,
               buyerId: auth.user.id,
               status: "PENDING_PAYMENT",
+              totalAmount: payment.grossAmount,
               expiresAt: { $gt: new Date() },
-            })
-          ) {
-            qrString = prasmulPaymentCode;
+            }).select("expiresAt").lean();
+            if (availableOrder) {
+              qrString = payment.prasmulPaymentCode;
+              expiredPayment = new Date(Math.min(
+                expiredPayment.getTime(),
+                availableOrder.expiresAt.getTime(),
+              ));
+            }
           }
         } catch {
+          verificationMessage = verificationStatus === "PAID"
+            ? "PRASMUL confirmed payment, but the order requires reconciliation. Do not pay again."
+            : "Payment verification is unavailable. Do not pay again.";
+          verificationStatus = "UNKNOWN";
           console.error("Could not verify PRASMUL payment status.", payment._id.toString());
         }
       }
+      const { prasmulPaymentCode, prasmulExpiredPayment, paymentData, ...safePayment } = payment;
+      void prasmulPaymentCode;
+      void prasmulExpiredPayment;
+      void paymentData;
       responsePayments.push({
         ...safePayment,
         verificationStatus,
+        verificationMessage,
         qrString,
         expiredPayment,
         testMode: false,

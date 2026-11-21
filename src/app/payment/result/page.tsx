@@ -19,7 +19,8 @@ type Payment = {
   status: PaymentStatus;
   createdAt: string;
   paidAt?: string;
-  verificationStatus?: "PENDING" | "UNKNOWN";
+  verificationStatus?: "PENDING" | "PAID" | "UNKNOWN";
+  verificationMessage?: string;
 };
 
 const statusCopy: Record<
@@ -78,10 +79,12 @@ export default function PaymentResultPage() {
     let active = true;
     let attempts = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let isPrasmul = false;
 
     const requestedOrderId = orderId;
 
     async function loadPayment() {
+      attempts += 1;
       try {
         const payments = await apiRequest<Payment[]>(
           `/api/payments?orderId=${encodeURIComponent(requestedOrderId)}`,
@@ -93,17 +96,17 @@ export default function PaymentResultPage() {
           setLoading(false);
           return;
         }
+        isPrasmul = current.provider === "PRASMUL";
         setPayment(current);
         setError("");
         setProviderNotice(
           current.provider === "PRASMUL" &&
             current.verificationStatus === "UNKNOWN"
-            ? "Payment requires verification. Do not pay again."
+            ? current.verificationMessage ?? "Payment requires verification. Do not pay again."
             : "",
         );
-        attempts += 1;
-        if (current.status === "PENDING" && attempts < 100) {
-          timer = setTimeout(loadPayment, 3000);
+        if (current.status === "PENDING" && (attempts < 100 || current.provider === "PRASMUL")) {
+          timer = setTimeout(loadPayment, attempts < 100 ? 3000 : 30000);
         }
 
         if (active) {
@@ -118,6 +121,9 @@ export default function PaymentResultPage() {
             : "Could not load payment status.",
         );
         setLoading(false);
+        if (isPrasmul) {
+          timer = setTimeout(loadPayment, attempts < 100 ? 3000 : 30000);
+        }
       }
     }
 

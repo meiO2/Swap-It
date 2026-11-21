@@ -16,6 +16,7 @@ SET_LOOP_TASK_STACK_SIZE(16384);
 
 void setup() {
     Serial.begin(115200);
+    initializeAccessControl();
     delay(2500);
 
     Serial.println();
@@ -51,8 +52,11 @@ void setup() {
     initializeAPI();
 
     Serial.println("[DEBUG 10] Initializing access control...");
-    initializeAccessControl();
+#if ENABLE_PHYSICAL_RELAY
+    startRemoteUnlockTask();
+#else
     startQrScannerTask();
+#endif
 
     Serial.println("\n[SYSTEM] Initialization complete.");
 }

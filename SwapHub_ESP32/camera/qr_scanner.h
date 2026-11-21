@@ -4,13 +4,9 @@
 #include <Arduino.h>
 #include <esp_camera.h>
 #include <img_converters.h>
-<<<<<<< Updated upstream
-#include <quirc.h>
-#include <esp_heap_caps.h>
-=======
 #include "../src/quirc/quirc.h"
+#include <esp_heap_caps.h>
 #include <string.h>
->>>>>>> Stashed changes
 
 #define QR_TOKEN_LENGTH       43
 #define QR_SCAN_INTERVAL_MS   150

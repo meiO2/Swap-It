@@ -14,6 +14,7 @@
 
     export type HubScanRequest = {
     token: string;
+    remoteUnlock?: boolean;
     };
 
     export type HubActivity = "DONATION" | "SELLER_HANDOVER";

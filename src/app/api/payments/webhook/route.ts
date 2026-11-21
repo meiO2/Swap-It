@@ -9,10 +9,10 @@ import Order from "@/models/Order";
 import Payment, { type PaymentStatus } from "@/models/Payment";
 import Product from "@/models/Product";
 import {
-  consumeReservedGreenPoints,
   restoreReservedGreenPoints,
 } from "@/lib/green-points";
 import { createNotificationsForMany } from "@/lib/notifications";
+import { finalizePaidOrder } from "@/lib/payment-finalization";
 
 type XenditSessionNotification = {
   event?: string;
@@ -173,43 +173,7 @@ export async function POST(request: Request) {
         if (!updated) return;
 
         if (paymentStatus === "PAID") {
-          const handoverDeadline = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
-          await Order.updateOne(
-            { _id: orderId, status: "PENDING_PAYMENT" },
-            {
-              $set: {
-                status: "AWAITING_SELLER_HANDOVER",
-                "items.$[].handover.status": "AWAITING_SELLER_SCHEDULE",
-                "items.$[].handoverDeadline": handoverDeadline,
-              },
-            },
-            { session },
-          );
-          const paidOrder = await Order.findById(orderId).session(session).lean();
-          if (paidOrder?.status === "AWAITING_SELLER_HANDOVER") {
-            await consumeReservedGreenPoints({
-              orderId: paidOrder._id.toString(),
-              session,
-            });
-            await Product.updateMany(
-              { _id: { $in: paidOrder.items.map((item) => item.productId) }, status: "RESERVED" },
-              { $set: { status: "SOLD_PENDING_HANDOVER" } },
-              { session },
-            );
-            const sellerIds = [
-              ...new Set(paidOrder.items.map((item) => item.sellerId.toString())),
-            ];
-            await createNotificationsForMany({
-              recipientIds: sellerIds,
-              senderId: paidOrder.buyerId.toString(),
-              type: "ORDER_UPDATE",
-              title: "New order received",
-              message:
-                "A buyer has placed an order for your product. Please choose drop-off or pickup and hand it over within 3 calendar days.",
-              link: "/orders",
-              session,
-            });
-          }
+          await finalizePaidOrder(orderId, session);
         } else {
           await Order.updateOne(
             { _id: orderId, status: "PENDING_PAYMENT" },

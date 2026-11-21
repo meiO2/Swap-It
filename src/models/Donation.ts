@@ -24,6 +24,7 @@ export interface IDonation {
   socialDonationItems: number;
   gpAwarded: number;
   status: DonationStatus;
+  remoteUnlockPending?: { sessionId: mongoose.Types.ObjectId; expiresAt: Date };
   confirmedAt?: Date;
   verifiedAt?: Date;
   verifiedBy?: mongoose.Types.ObjectId;
@@ -101,6 +102,13 @@ const DonationSchema = new Schema<IDonation>(
         "CANCELLED",
       ],
       default: "SESSION_CREATED",
+    },
+    remoteUnlockPending: {
+      type: new Schema({
+        sessionId: { type: Schema.Types.ObjectId, required: true },
+        expiresAt: { type: Date, required: true },
+      }, { _id: false }),
+      required: false,
     },
     confirmedAt: Date,
     verifiedAt: Date,

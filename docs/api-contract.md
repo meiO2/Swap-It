@@ -56,34 +56,56 @@ QC endpoints allow ADMIN and INSPECTOR.
   points. Orders with a PRASMUL payment require manual reconciliation and
   cannot be cancelled by this endpoint.
 - `POST /api/payments` — authenticated `{ orderId }`; creates or returns the
-  pending Xendit QRIS payment for the buyer's pending order. With
-  `PAYMENT_PROVIDER=PRASMUL`, returns 503 while verified confirmation and
-  callback requirements remain unresolved; no new QR is created.
+  pending QRIS payment for the buyer's pending order. With
+  `PAYMENT_PROVIDER=PRASMUL`, the provider create request uses
+  `/api/partners/orders/`. A configured provider-confirmed expiry time zone,
+  callback URL, credentials and unique payment order index are required before
+  creating a new PRASMUL payment. Production requires
+  `https://swapitproject.web.id/api/payments/prasmul/callback/qris` as
+  `PRASMUL_WEBHOOK_URL`. The provider amount must equal checkout.
 - `GET /api/payments?orderId=:id` — returns the current user's payment status.
-  PRASMUL records are checked against the provider without changing local
-  payment or order status. `verificationStatus` is `PENDING` only for the
-  observed unpaid status; other statuses and lookup failures are `UNKNOWN`.
-  Polling uses the legacy provider order-detail endpoint and does not rely on
-  callbacks. PRASMUL QR codes are not exposed while confirmation is disabled.
+  Pending PRASMUL records are checked using the provider's legacy order-detail
+  endpoint. A matching `Lunas` atomically finalizes the payment and order;
+  `Belum Lunas` remains pending, while mismatches, unknown statuses and lookup
+  failures remain unverified. When both sides have a QR ID, they must match.
+  If a verified payment cannot be finalized, `verificationMessage` explains
+  that reconciliation is required. Polling does not depend on callbacks or
+  run in the background when no client requests status. An existing PRASMUL
+  QR is shown only if its QR ID and code match the provider detail, the amount
+  matches the payment and pending order, and both expiry checks pass.
   `expiredPayment` is omitted unless the provider's expiry can be parsed
   with an explicit or provider-confirmed configured time zone and matches
-  the local record; the timestamp itself does not establish expired status.
+  the local record. When a QR is displayed, it is the earlier of the provider
+  expiry and the order payment deadline; the timestamp itself does not
+  establish expired status.
+- `GET /api/prasmul/status?orderId=:id` — authenticated PRASMUL detail check
+  for the buyer's payment. A matching `Lunas` also triggers the same atomic
+  finalization as the callback and main payments endpoint.
 - `POST /api/payments/webhook` — Xendit payment callback. A successful payment
   consumes the order's reserved GP redemption and advances the order to seller
   handover.
-- `POST /api/payments/prasmul/webhook` — rejects notifications with 503
-  until PRASMUL webhook authentication and event semantics are verified; it
-  does not parse events or change payment state.
-- `POST /api/payments/prasmul/callback/qris` — returns 503 unless
-  `NODE_ENV=development` and `PRASMUL_QRIS_CALLBACK_TEST_MODE=true`. In that
-  test mode it validates the provided example: `event: "qr.payment"`, nonempty
-  string `data.id`, `data.reference_id` with the `PRASMUL-` prefix and a
-  nonempty suffix without whitespace, `data.status: "COMPLETED"`, and finite
-  numeric `data.amount`. A valid request returns 200 with `mode: "TEST"`,
-  `authenticated: false`, and `paymentProcessed: false`; invalid JSON or
-  fields return 400 and non-JSON content returns 415. It never accesses
-  payments or finalizes orders. The official authentication, paid status, and
-  retry contract remain unverified; this is not a functional payment callback.
+- `POST /api/payments/prasmul/webhook` — legacy alias of the QRIS callback
+  below; it uses the same payload validation and provider verification.
+  Configure new orders with the canonical QRIS callback URL, not this alias.
+- `POST /api/payments/prasmul/callback/qris` — accepts the provided
+  `qr.payment` example with a case-insensitive `PRASMUL-` reference prefix,
+  `data.status: "COMPLETED"`, a nonempty `data.id`, and a positive safe-integer
+  `data.amount`. The callback itself is not authenticated. It identifies a
+  single local PRASMUL payment and independently fetches the provider order;
+  only `Lunas` with matching reference, QRIS method and amounts can finalize
+  the payment. `data.id` is not equated with the provider order ID or stored
+  as a verified transaction ID. Finalization is atomic and duplicate callbacks
+  do not repeat it. If creation metadata has not yet been stored, the provider
+  amount must still match `grossAmount`, and is recorded during finalization;
+  a stored provider amount must match, as must QR IDs present on both sides. A
+  mismatched or ambiguous reference, amount or order state
+  is rejected for reconciliation; lookup failure returns 502.
+  When `NODE_ENV=development` and `PRASMUL_QRIS_CALLBACK_TEST_MODE=true`,
+  valid payloads return `mode: "TEST"` and `paymentProcessed: false` without
+  database or provider access. Official callback authentication and other
+  provider status semantics remain unverified. MongoDB must support transactions
+  (replica set or sharded cluster); the known standalone transaction error
+  returns 503 without finalizing payment.
 - `POST /api/uploads` — authenticated multipart upload with 1-8 `images`
   files (JPEG, PNG, or WebP; up to 5 MB each). The server uploads files to
   Cloudinary and returns their HTTPS URLs.
@@ -216,7 +238,21 @@ sourced from frontend repository data, not separate APIs.
   one-time QR token for the selected Hub.
 - `POST /api/iot/scan` — Hub device only; requires `x-device-id` and
   `x-device-key` and a `{ token }` body. Consumes the QR token and moves the
-  donation to `QR_SCANNED` atomically.
+  donation to `QR_SCANNED` atomically. For donation tokens only,
+  `{ token, remoteUnlock: true }` instead creates a short-lived remote command
+  and leaves the donation pending until the device acknowledges activation.
+- `POST /api/admin/hub-scanner` — ADMIN and same-origin only; accepts
+  `{ token }`, verifies it using the configured scanner device credentials
+  and queues the command for that device. Never send device credentials to
+  the browser.
+- `GET /api/admin/hub-scanner/:id` — ADMIN only; reports the remote command
+  status (`PENDING`, `CLAIMED`, `RELAY_ACTIVATED`, or `EXPIRED`). A claimed
+  command without an acknowledgement has an unknown physical outcome.
+- `POST /api/iot/remote-unlock` — authenticated Hub device only. `{ action:
+  "CLAIM" }` atomically claims one unexpired command at most once.
+  `{ action: "RELAY_ACTIVATED", sessionId }` acknowledges activation
+  idempotently and advances the matching donation to `QR_SCANNED`. It does
+  not assert that a door opened or an item was deposited.
 - `POST /api/iot/door-event` — Hub device only; requires those same headers and
   `{ sessionId, event, occurredAt }`. The `DOOR_LOCKED` event confirms the
   physical donation and moves it to `UNDER_VERIFICATION`.

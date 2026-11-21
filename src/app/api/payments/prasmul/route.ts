@@ -3,8 +3,10 @@ import { unstable_rethrow } from "next/navigation";
 import mongoose from "mongoose";
 import { requireAuth } from "@/lib/authorization";
 import { connectDB } from "@/lib/mongodb";
+import { isMongoTransactionsUnsupported } from "@/lib/mongodb-transactions";
 import {
   createPrasmulQrOrder,
+  assertPrasmulConfigured,
   calculatePrasmulBasicPrice,
   getPrasmulOrderDetail,
   getPrasmulOrderReference,
@@ -21,7 +23,9 @@ import {
 import Order from "@/models/Order";
 import Payment from "@/models/Payment";
 import { getPaymentProvider } from "@/lib/payment-provider";
-import { PRASMUL_CONFIRMATION_VERIFIED, verifyPrasmulStatus } from "@/lib/prasmul-status";
+import { verifyPrasmulStatus } from "@/lib/prasmul-status";
+
+class PrasmulOrderCreationConflict extends Error {}
 
 function isDuplicateKeyError(error: unknown): boolean {
   return (
@@ -64,8 +68,8 @@ async function saveRemoteOrder(
   expiry: Date | undefined,
   qrString: string | undefined,
 ) {
-  await Payment.updateOne(
-    { _id: paymentId, provider: "PRASMUL" },
+  const updated = await Payment.updateOne(
+    { _id: paymentId, provider: "PRASMUL", status: "PENDING" },
     {
       $set: {
         prasmulOrderId: remoteOrder.order_id,
@@ -94,6 +98,7 @@ async function saveRemoteOrder(
     },
   );
 
+  if (updated.matchedCount !== 1) return null;
   return Payment.findById(paymentId).lean();
 }
 
@@ -112,13 +117,6 @@ export async function POST(request: NextRequest) {
         { status: 409 },
       );
     }
-    if (!PRASMUL_CONFIRMATION_VERIFIED) {
-      return NextResponse.json(
-        { success: false, message: "PRASMUL payment creation is unavailable until provider confirmation is verified." },
-        { status: 503 },
-      );
-    }
-
     await connectDB();
 
     const body = await request.json();
@@ -169,6 +167,14 @@ export async function POST(request: NextRequest) {
     // melanjutkan ke POST create PRASMUL.
     if (!payment) {
       try {
+        assertPrasmulConfigured();
+      } catch {
+        return NextResponse.json(
+          { success: false, message: "PRASMUL credentials or base URL are not configured." },
+          { status: 503 },
+        );
+      }
+      try {
         calculatePrasmulBasicPrice(order.totalAmount);
       } catch (error) {
         if (!(error instanceof PrasmulAmountError)) throw error;
@@ -189,15 +195,24 @@ export async function POST(request: NextRequest) {
         webhook.protocol !== "https:" ||
         webhook.username ||
         webhook.password ||
-        ![
-          "/api/payments/prasmul/webhook",
-          "/api/payments/prasmul/callback/qris",
-        ].includes(webhook.pathname) ||
+        webhook.pathname !== "/api/payments/prasmul/callback/qris" ||
         webhook.search ||
         webhook.hash
       ) {
         return NextResponse.json(
           { success: false, message: "PRASMUL webhook URL is invalid." },
+          { status: 503 },
+        );
+      }
+      const isProduction = process.env.VERCEL_ENV
+        ? process.env.VERCEL_ENV === "production"
+        : process.env.NODE_ENV === "production";
+      if (
+        isProduction &&
+        webhook.href !== "https://swapitproject.web.id/api/payments/prasmul/callback/qris"
+      ) {
+        return NextResponse.json(
+          { success: false, message: "PRASMUL production webhook URL is invalid." },
           { status: 503 },
         );
       }
@@ -208,30 +223,65 @@ export async function POST(request: NextRequest) {
           { status: 503 },
         );
       }
+      const timeZone = process.env.PRASMUL_TIME_ZONE?.trim();
+      if (!timeZone) {
+        return NextResponse.json(
+          { success: false, message: "PRASMUL expiry time zone must be confirmed and configured before creation." },
+          { status: 503 },
+        );
+      }
       try {
-        const createdPayment = await Payment.create({
-          orderId: order._id,
-          userId: order.buyerId,
-          provider: "PRASMUL",
+        new Intl.DateTimeFormat("en-US", { timeZone });
+      } catch (error) {
+        if (!(error instanceof RangeError)) throw error;
+        return NextResponse.json(
+          { success: false, message: "PRASMUL expiry time zone is invalid." },
+          { status: 503 },
+        );
+      }
+      const session = await mongoose.startSession();
+      try {
+        await session.withTransaction(async () => {
+          const reservedOrder = await Order.updateOne(
+            {
+              _id: order._id,
+              buyerId: order.buyerId,
+              status: "PENDING_PAYMENT",
+              totalAmount: order.totalAmount,
+              expiresAt: { $gt: new Date() },
+            },
+            { $inc: { __v: 1 } },
+            { session },
+          );
+          if (reservedOrder.matchedCount !== 1) {
+            throw new PrasmulOrderCreationConflict("Order is no longer available for payment.");
+          }
 
-          // Field lama masih required dan unique di schema.
-          midtransOrderId: `prasmul-${order._id.toString()}`,
+          const [createdPayment] = await Payment.create([{
+            orderId: order._id,
+            userId: order.buyerId,
+            provider: "PRASMUL",
+            midtransOrderId: `prasmul-${order._id.toString()}`,
+            prasmulOrderId: newReference,
+            grossAmount: order.totalAmount,
+            paymentType: "QRIS",
+            status: "PENDING",
+            paymentData: {
+              prasmulPartnerCode: "PRASMUL",
+              prasmulStatus: "CREATING",
+            },
+          }], { session });
 
-          prasmulOrderId: newReference,
-          grossAmount: order.totalAmount,
-          paymentType: "QRIS",
-          status: "PENDING",
-
-          paymentData: {
-            prasmulPartnerCode: "PRASMUL",
-            prasmulStatus: "CREATING",
-          },
+          payment = createdPayment.toObject();
         });
-
-        payment = createdPayment.toObject();
         createdLocally = true;
       } catch (error) {
-        // Bisa terjadi jika request lain lebih dahulu membuat Payment.
+        if (error instanceof PrasmulOrderCreationConflict) {
+          return NextResponse.json(
+            { success: false, message: error.message },
+            { status: 409 },
+          );
+        }
         if (!isDuplicateKeyError(error)) {
           throw error;
         }
@@ -239,6 +289,8 @@ export async function POST(request: NextRequest) {
         payment = await Payment.findOne({
           orderId: order._id,
         }).lean();
+      } finally {
+        await session.endSession();
       }
     }
 
@@ -262,6 +314,12 @@ export async function POST(request: NextRequest) {
         { status: 409 },
       );
     }
+    if (payment.status !== "PENDING") {
+      return NextResponse.json(
+        { success: false, message: "This order already has a final payment status." },
+        { status: 409 },
+      );
+    }
 
     // Pastikan referensi lokal konsisten.
     if (!payment.prasmulOrderId) {
@@ -271,8 +329,8 @@ export async function POST(request: NextRequest) {
       );
     }
     if (
-      payment.prasmulOrderId !== newReference &&
-      payment.prasmulOrderId !== legacyReference
+      payment.prasmulOrderId.toLowerCase() !== newReference.toLowerCase() &&
+      payment.prasmulOrderId.toLowerCase() !== legacyReference.toLowerCase()
     ) {
       return NextResponse.json(
         {
@@ -323,7 +381,10 @@ export async function POST(request: NextRequest) {
 
     // Jika provider sudah memiliki order, simpan detailnya.
     if (remoteOrder) {
-      if (remoteOrder.order_id !== prasmulOrderId) {
+      if (
+        typeof remoteOrder.order_id !== "string" ||
+        remoteOrder.order_id.toLowerCase() !== prasmulOrderId.toLowerCase()
+      ) {
         return NextResponse.json(
           {
             success: false,
@@ -379,7 +440,7 @@ export async function POST(request: NextRequest) {
 
       if (createdOrder) {
         const recorded = await Payment.updateOne(
-          { _id: payment._id, provider: "PRASMUL", prasmulOrderId },
+          { _id: payment._id, provider: "PRASMUL", prasmulOrderId, status: "PENDING" },
           {
             $set: {
               "paymentData.prasmulCreateResponse": {
@@ -391,6 +452,12 @@ export async function POST(request: NextRequest) {
                 status: createdOrder.status,
                 expiredPayment: createdOrder.expired_payment,
               },
+              prasmulQrId: createdOrder.qr_id,
+              prasmulBasicPrice: createdOrder.basic_price,
+              prasmulAmount: createdOrder.amount,
+              ...(createdOrder.amount === order.totalAmount
+                ? { prasmulPaymentCode: getPrasmulQrString(createdOrder) }
+                : {}),
             },
           },
         );
@@ -416,7 +483,8 @@ export async function POST(request: NextRequest) {
           );
         }
         if (
-          remoteOrder.order_id !== createdOrder.order_id ||
+          typeof remoteOrder.order_id !== "string" ||
+          remoteOrder.order_id.toLowerCase() !== createdOrder.order_id.toLowerCase() ||
           remoteOrder.qr_id !== createdOrder.qr_id ||
           remoteOrder.basic_price !== createdOrder.basic_price ||
           remoteOrder.amount !== createdOrder.amount
@@ -441,7 +509,8 @@ export async function POST(request: NextRequest) {
     }
 
     if (
-      remoteOrder.order_id !== prasmulOrderId ||
+      typeof remoteOrder.order_id !== "string" ||
+      remoteOrder.order_id.toLowerCase() !== prasmulOrderId.toLowerCase() ||
       typeof remoteOrder.payment_method !== "string" ||
       remoteOrder.payment_method.toUpperCase() !== "QRIS"
     ) {
@@ -537,6 +606,19 @@ export async function POST(request: NextRequest) {
         { status: 409 },
       );
     }
+    const availableOrder = await Order.findOne({
+      _id: order._id,
+      buyerId: auth.user.id,
+      status: "PENDING_PAYMENT",
+      totalAmount: savedPayment.grossAmount,
+      expiresAt: { $gt: new Date() },
+    }).select("expiresAt").lean();
+    if (!availableOrder) {
+      return NextResponse.json(
+        { success: false, message: "The PRASMUL payment is not available for display." },
+        { status: 409 },
+      );
+    }
 
     return NextResponse.json({
       success: true,
@@ -548,11 +630,18 @@ export async function POST(request: NextRequest) {
         qrString: savedPayment.prasmulPaymentCode,
         grossAmount: savedPayment.grossAmount,
         providerAmount: savedPayment.prasmulAmount,
-        expiredPayment: savedPayment.prasmulExpiredPayment,
+        expiredPayment: new Date(Math.min(expiredAt.getTime(), availableOrder.expiresAt.getTime())),
       },
     });
   } catch (error) {
     unstable_rethrow(error);
+    if (isMongoTransactionsUnsupported(error)) {
+      console.error("PRASMUL payment creation requires a MongoDB replica set or sharded cluster.");
+      return NextResponse.json(
+        { success: false, message: "MongoDB transactions are unavailable; PRASMUL payment creation cannot proceed." },
+        { status: 503 },
+      );
+    }
     console.error("Create PRASMUL payment failed.");
 
     return NextResponse.json(

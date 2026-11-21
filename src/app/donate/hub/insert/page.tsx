@@ -38,8 +38,8 @@ function InsertContent() {
             <motion.span aria-hidden="true" className="absolute right-[17%] top-[26%] h-3 w-1 rotate-45 rounded-full bg-hub-primary" animate={{ opacity: [0.4, 1, 0.4], y: [0, -3, 0] }} transition={{ duration: 1.7, repeat: Infinity, delay: 0.3 }} />
             <motion.span aria-hidden="true" className="absolute right-[12%] top-[52%] h-2.5 w-1 -rotate-12 rounded-full bg-hub-primary" animate={{ opacity: [0.3, 0.9, 0.3], x: [0, 2, 0] }} transition={{ duration: 2.2, repeat: Infinity, delay: 0.6 }} />
           </div>
-          <span className="mx-auto flex min-h-9 w-fit items-center gap-2 rounded-full bg-hub-mint-strong px-4 text-xs font-semibold text-hub-primary"><Check size={15} /> Hub lid is open</span>
-          <p className="mx-auto mt-3 max-w-xs text-xs leading-relaxed text-hub-muted">Put your clothes into the Hub one by one, then enter how many pieces you inserted.</p>
+          <span className="mx-auto flex min-h-9 w-fit items-center gap-2 rounded-full bg-hub-mint-strong px-4 text-xs font-semibold text-hub-primary"><Check size={15} /> Hub access authorized</span>
+          <p className="mx-auto mt-3 max-w-xs text-xs leading-relaxed text-hub-muted">Check that the Hub lid can be opened, then insert your clothes and enter how many pieces you inserted.</p>
         </section>
 
         <section className="mt-4 rounded-3xl bg-white p-4 shadow-card">
