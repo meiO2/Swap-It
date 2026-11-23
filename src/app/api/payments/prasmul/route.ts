@@ -475,8 +475,15 @@ export async function POST(request: NextRequest) {
         }
         try {
           remoteOrder = await getPrasmulOrderDetail(prasmulOrderId);
-        } catch {
-          console.error("PRASMUL detail lookup failed after creation.");
+        } catch (error) {
+          console.error("PRASMUL detail lookup failed.", {
+            errorName: error instanceof Error ? error.name : "UnknownError",
+            errorMessage:
+              error instanceof Error ? error.message : String(error),
+            providerStatus:
+              error instanceof PrasmulApiError ? error.status : undefined,
+            reference: prasmulOrderId,
+          });
           return NextResponse.json(
             { success: false, message: "PRASMUL creation was recorded, but its detail could not be verified. Please contact support.", reference: prasmulOrderId },
             { status: 502 },
