@@ -62,10 +62,8 @@ export async function getPrasmulToken(): Promise<string> {
   if (!tokenRequest) {
     tokenRequest = (async () => {
       const { baseUrl, email, password } = getPrasmulConfig();
-      const loginPath = isDigitalCity(baseUrl)
-        ? "/api/partner/auth/login"
-        : "/api/partners/login/";
-      const response = await fetch(`${baseUrl}${loginPath}`, {
+
+      const response = await fetch(`${baseUrl}/api/partners/login/`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -81,22 +79,24 @@ export async function getPrasmulToken(): Promise<string> {
 
       const data = (await response.json()) as PrasmulLoginResponse;
       const token = data.token ?? data.access ?? data.access_token;
+
       if (!token || typeof token !== "string") {
         throw new Error("PRASMUL login response does not contain a token.");
       }
+
       cachedToken = token;
       return token;
     })();
   }
 
   const pending = tokenRequest;
+
   try {
     return await pending;
   } finally {
     if (tokenRequest === pending) tokenRequest = null;
   }
 }
-
 
 export type PrasmulOrder = {
   id: number;
