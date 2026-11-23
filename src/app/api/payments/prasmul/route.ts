@@ -113,7 +113,10 @@ export async function POST(request: NextRequest) {
 
     if (getPaymentProvider() !== "PRASMUL") {
       return NextResponse.json(
-        { success: false, message: "PRASMUL is not the active payment provider." },
+        {
+          success: false,
+          message: "PRASMUL is not the active payment provider.",
+        },
         { status: 409 },
       );
     }
@@ -170,7 +173,10 @@ export async function POST(request: NextRequest) {
         assertPrasmulConfigured();
       } catch {
         return NextResponse.json(
-          { success: false, message: "PRASMUL credentials or base URL are not configured." },
+          {
+            success: false,
+            message: "PRASMUL credentials or base URL are not configured.",
+          },
           { status: 503 },
         );
       }
@@ -179,14 +185,21 @@ export async function POST(request: NextRequest) {
       } catch (error) {
         if (!(error instanceof PrasmulAmountError)) throw error;
         return NextResponse.json(
-          { success: false, message: "PRASMUL cannot produce an exact QRIS amount for this checkout." },
+          {
+            success: false,
+            message:
+              "PRASMUL cannot produce an exact QRIS amount for this checkout.",
+          },
           { status: 409 },
         );
       }
       webhookUrl = process.env.PRASMUL_WEBHOOK_URL;
       if (!webhookUrl || !URL.canParse(webhookUrl)) {
         return NextResponse.json(
-          { success: false, message: "PRASMUL webhook URL is not configured or invalid." },
+          {
+            success: false,
+            message: "PRASMUL webhook URL is not configured or invalid.",
+          },
           { status: 503 },
         );
       }
@@ -209,24 +222,36 @@ export async function POST(request: NextRequest) {
         : process.env.NODE_ENV === "production";
       if (
         isProduction &&
-        webhook.href !== "https://swapitproject.web.id/api/payments/prasmul/callback/qris"
+        webhook.href !==
+          "https://swapitproject.web.id/api/payments/prasmul/callback/qris"
       ) {
         return NextResponse.json(
-          { success: false, message: "PRASMUL production webhook URL is invalid." },
+          {
+            success: false,
+            message: "PRASMUL production webhook URL is invalid.",
+          },
           { status: 503 },
         );
       }
       const indexes = await Payment.collection.indexes();
       if (!hasUniquePaymentOrderIndex(indexes)) {
         return NextResponse.json(
-          { success: false, message: "A unique payment order index is required before creating PRASMUL payments." },
+          {
+            success: false,
+            message:
+              "A unique payment order index is required before creating PRASMUL payments.",
+          },
           { status: 503 },
         );
       }
       const timeZone = process.env.PRASMUL_TIME_ZONE?.trim();
       if (!timeZone) {
         return NextResponse.json(
-          { success: false, message: "PRASMUL expiry time zone must be confirmed and configured before creation." },
+          {
+            success: false,
+            message:
+              "PRASMUL expiry time zone must be confirmed and configured before creation.",
+          },
           { status: 503 },
         );
       }
@@ -254,23 +279,30 @@ export async function POST(request: NextRequest) {
             { session },
           );
           if (reservedOrder.matchedCount !== 1) {
-            throw new PrasmulOrderCreationConflict("Order is no longer available for payment.");
+            throw new PrasmulOrderCreationConflict(
+              "Order is no longer available for payment.",
+            );
           }
 
-          const [createdPayment] = await Payment.create([{
-            orderId: order._id,
-            userId: order.buyerId,
-            provider: "PRASMUL",
-            midtransOrderId: `prasmul-${order._id.toString()}`,
-            prasmulOrderId: newReference,
-            grossAmount: order.totalAmount,
-            paymentType: "QRIS",
-            status: "PENDING",
-            paymentData: {
-              prasmulPartnerCode: "PRASMUL",
-              prasmulStatus: "CREATING",
-            },
-          }], { session });
+          const [createdPayment] = await Payment.create(
+            [
+              {
+                orderId: order._id,
+                userId: order.buyerId,
+                provider: "PRASMUL",
+                midtransOrderId: `prasmul-${order._id.toString()}`,
+                prasmulOrderId: newReference,
+                grossAmount: order.totalAmount,
+                paymentType: "QRIS",
+                status: "PENDING",
+                paymentData: {
+                  prasmulPartnerCode: "PRASMUL",
+                  prasmulStatus: "CREATING",
+                },
+              },
+            ],
+            { session },
+          );
 
           payment = createdPayment.toObject();
         });
@@ -316,7 +348,10 @@ export async function POST(request: NextRequest) {
     }
     if (payment.status !== "PENDING") {
       return NextResponse.json(
-        { success: false, message: "This order already has a final payment status." },
+        {
+          success: false,
+          message: "This order already has a final payment status.",
+        },
         { status: 409 },
       );
     }
@@ -324,7 +359,11 @@ export async function POST(request: NextRequest) {
     // Pastikan referensi lokal konsisten.
     if (!payment.prasmulOrderId) {
       return NextResponse.json(
-        { success: false, message: "The stored PRASMUL reference is missing; manual reconciliation is required." },
+        {
+          success: false,
+          message:
+            "The stored PRASMUL reference is missing; manual reconciliation is required.",
+        },
         { status: 409 },
       );
     }
@@ -351,21 +390,30 @@ export async function POST(request: NextRequest) {
       remoteOrder = await getPrasmulOrderDetail(prasmulOrderId);
     } catch (error) {
       if (!isNotFound(error)) {
-        console.error("PRASMUL detail lookup failed.");
+        console.error("PRASMUL FIRST DETAIL LOOKUP FAILED", {
+          errorName: error instanceof Error ? error.name : "UnknownError",
+          errorMessage: error instanceof Error ? error.message : String(error),
+          providerStatus:
+            error instanceof PrasmulApiError ? error.status : null,
+        });
 
         return NextResponse.json(
           {
             success: false,
-            message:
-              "Could not verify the existing PRASMUL order. Please try again later.",
+            message: "PRASMUL first detail lookup failed.",
+            diagnostic: {
+              errorName: error instanceof Error ? error.name : "UnknownError",
+              errorMessage:
+                error instanceof Error ? error.message : String(error),
+              providerStatus:
+                error instanceof PrasmulApiError ? error.status : null,
+            },
             reference: prasmulOrderId,
           },
           { status: 502 },
         );
       }
 
-      // Hanya catatan lokal yang baru dibuat oleh request ini
-      // yang boleh melanjutkan ke POST create setelah hasil GET 404.
       if (!createdLocally) {
         return NextResponse.json(
           {
@@ -395,7 +443,10 @@ export async function POST(request: NextRequest) {
       }
       if (payment.prasmulQrId && remoteOrder.qr_id !== payment.prasmulQrId) {
         return NextResponse.json(
-          { success: false, message: "PRASMUL QR identity does not match the stored payment." },
+          {
+            success: false,
+            message: "PRASMUL QR identity does not match the stored payment.",
+          },
           { status: 409 },
         );
       }
@@ -440,7 +491,12 @@ export async function POST(request: NextRequest) {
 
       if (createdOrder) {
         const recorded = await Payment.updateOne(
-          { _id: payment._id, provider: "PRASMUL", prasmulOrderId, status: "PENDING" },
+          {
+            _id: payment._id,
+            provider: "PRASMUL",
+            prasmulOrderId,
+            status: "PENDING",
+          },
           {
             $set: {
               "paymentData.prasmulCreateResponse": {
@@ -463,13 +519,23 @@ export async function POST(request: NextRequest) {
         );
         if (recorded.matchedCount !== 1) {
           return NextResponse.json(
-            { success: false, message: "PRASMUL creation could not be recorded. Manual reconciliation is required.", reference: prasmulOrderId },
+            {
+              success: false,
+              message:
+                "PRASMUL creation could not be recorded. Manual reconciliation is required.",
+              reference: prasmulOrderId,
+            },
             { status: 500 },
           );
         }
         if (createdOrder.amount !== order.totalAmount) {
           return NextResponse.json(
-            { success: false, message: "PRASMUL QRIS amount does not match the SwapIt checkout total. The transaction has been saved for manual reconciliation.", reference: prasmulOrderId },
+            {
+              success: false,
+              message:
+                "PRASMUL QRIS amount does not match the SwapIt checkout total. The transaction has been saved for manual reconciliation.",
+              reference: prasmulOrderId,
+            },
             { status: 409 },
           );
         }
@@ -503,13 +569,19 @@ export async function POST(request: NextRequest) {
         }
         if (
           typeof remoteOrder.order_id !== "string" ||
-          remoteOrder.order_id.toLowerCase() !== createdOrder.order_id.toLowerCase() ||
+          remoteOrder.order_id.toLowerCase() !==
+            createdOrder.order_id.toLowerCase() ||
           remoteOrder.qr_id !== createdOrder.qr_id ||
           remoteOrder.basic_price !== createdOrder.basic_price ||
           remoteOrder.amount !== createdOrder.amount
         ) {
           return NextResponse.json(
-            { success: false, message: "PRASMUL creation and order detail do not match. Manual reconciliation is required.", reference: prasmulOrderId },
+            {
+              success: false,
+              message:
+                "PRASMUL creation and order detail do not match. Manual reconciliation is required.",
+              reference: prasmulOrderId,
+            },
             { status: 409 },
           );
         }
@@ -546,7 +618,10 @@ export async function POST(request: NextRequest) {
     // Dengan demikian, transaksi provider tidak hilang dari catatan lokal.
     let expiredAt: Date | undefined;
     try {
-      expiredAt = parsePrasmulExpiry(remoteOrder.expired_payment, process.env.PRASMUL_TIME_ZONE);
+      expiredAt = parsePrasmulExpiry(
+        remoteOrder.expired_payment,
+        process.env.PRASMUL_TIME_ZONE,
+      );
     } catch (error) {
       if (!(error instanceof PrasmulExpiryError)) throw error;
     }
@@ -557,7 +632,12 @@ export async function POST(request: NextRequest) {
       if (!(error instanceof PrasmulQrError)) throw error;
       console.error("PRASMUL returned an invalid QR value.", prasmulOrderId);
     }
-    const savedPayment = await saveRemoteOrder(payment._id, remoteOrder, expiredAt, qrString);
+    const savedPayment = await saveRemoteOrder(
+      payment._id,
+      remoteOrder,
+      expiredAt,
+      qrString,
+    );
 
     if (!savedPayment) {
       return NextResponse.json(
@@ -621,7 +701,10 @@ export async function POST(request: NextRequest) {
       !isReusableQr(savedPayment, order.totalAmount)
     ) {
       return NextResponse.json(
-        { success: false, message: "The PRASMUL payment is not available for display." },
+        {
+          success: false,
+          message: "The PRASMUL payment is not available for display.",
+        },
         { status: 409 },
       );
     }
@@ -631,10 +714,15 @@ export async function POST(request: NextRequest) {
       status: "PENDING_PAYMENT",
       totalAmount: savedPayment.grossAmount,
       expiresAt: { $gt: new Date() },
-    }).select("expiresAt").lean();
+    })
+      .select("expiresAt")
+      .lean();
     if (!availableOrder) {
       return NextResponse.json(
-        { success: false, message: "The PRASMUL payment is not available for display." },
+        {
+          success: false,
+          message: "The PRASMUL payment is not available for display.",
+        },
         { status: 409 },
       );
     }
@@ -649,7 +737,9 @@ export async function POST(request: NextRequest) {
         qrString: savedPayment.prasmulPaymentCode,
         grossAmount: savedPayment.grossAmount,
         providerAmount: savedPayment.prasmulAmount,
-        expiredPayment: new Date(Math.min(expiredAt.getTime(), availableOrder.expiresAt.getTime())),
+        expiredPayment: new Date(
+          Math.min(expiredAt.getTime(), availableOrder.expiresAt.getTime()),
+        ),
       },
     });
   } catch (error) {
