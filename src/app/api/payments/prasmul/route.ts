@@ -484,8 +484,20 @@ export async function POST(request: NextRequest) {
               error instanceof PrasmulApiError ? error.status : undefined,
             reference: prasmulOrderId,
           });
+
           return NextResponse.json(
-            { success: false, message: "PRASMUL creation was recorded, but its detail could not be verified. Please contact support.", reference: prasmulOrderId },
+            {
+              success: false,
+              message: "Could not verify the existing PRASMUL order.",
+              diagnostic: {
+                errorName: error instanceof Error ? error.name : "UnknownError",
+                errorMessage:
+                  error instanceof Error ? error.message : String(error),
+                providerStatus:
+                  error instanceof PrasmulApiError ? error.status : null,
+              },
+              reference: prasmulOrderId,
+            },
             { status: 502 },
           );
         }
