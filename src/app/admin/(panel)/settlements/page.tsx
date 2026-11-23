@@ -10,7 +10,9 @@ type PopulatedOrder = string | { _id?: string; status?: string; createdAt?: stri
 type DeliveryOrder = {
   _id: string;
   buyerId: PopulatedUser;
-  status: "PROCESSING" | "SHIPPED";
+  status: "PROCESSING" | "SHIPPED" | "READY_FOR_PICKUP";
+  deliveryMethod: "courier" | "pickup";
+  pickupHub?: { name?: string; address?: string };
   createdAt: string;
   courierName?: string;
   items: Array<{ name: string }>;
@@ -247,11 +249,15 @@ export default function AdminSettlementsPage() {
     return () => window.clearTimeout(timer);
   }, [load]);
 
-  async function updateDelivery(order: DeliveryOrder, action: "SHIPPED" | "DELIVERED") {
+  async function updateDelivery(order: DeliveryOrder, action: "SHIPPED" | "DELIVERED" | "READY_FOR_PICKUP" | "PICKED_UP") {
     const confirmed = window.confirm(
       action === "SHIPPED"
         ? "Record this QC-cleared order as shipped?"
-        : "Record this previously shipped order as delivered?",
+        : action === "READY_FOR_PICKUP"
+          ? `Confirm all items are physically available for pickup at ${order.pickupHub?.name ?? "the selected hub"}?`
+          : action === "PICKED_UP"
+            ? "Confirm the buyer has collected all items at the selected hub?"
+            : "Record this previously shipped order as delivered?",
     );
     if (!confirmed) return;
     setBusy(order._id);
@@ -482,24 +488,25 @@ export default function AdminSettlementsPage() {
           </section>
 
           <section className="space-y-3">
-            <h2 className="font-semibold text-ink">Shipment &amp; delivery</h2>
+            <h2 className="font-semibold text-ink">Shipment, delivery &amp; pickup</h2>
             {orders.map((order) => (
               <article key={order._id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white p-4 shadow-card">
                 <div>
                   <p className="font-semibold text-ink">Order {order._id}</p>
                   <p className="mt-1 text-xs text-ink-muted">{nameOf(order.buyerId)} · {order.items.map((item) => item.name).join(", ")}</p>
+                  {order.deliveryMethod === "pickup" && <p className="mt-1 text-xs text-ink-muted">Pickup: {order.pickupHub?.name ?? "Hub unavailable"} · {order.pickupHub?.address}</p>}
                 </div>
                 <button
                   type="button"
                   disabled={busy === order._id}
-                  onClick={() => void updateDelivery(order, order.status === "PROCESSING" ? "SHIPPED" : "DELIVERED")}
+                  onClick={() => void updateDelivery(order, order.deliveryMethod === "pickup" ? (order.status === "PROCESSING" ? "READY_FOR_PICKUP" : "PICKED_UP") : (order.status === "PROCESSING" ? "SHIPPED" : "DELIVERED"))}
                   className="min-h-10 rounded-full bg-primary px-4 text-xs font-semibold text-white disabled:opacity-60"
                 >
-                  {busy === order._id ? "Saving…" : order.status === "PROCESSING" ? "Record SHIPPED" : "Record DELIVERED"}
+                  {busy === order._id ? "Saving…" : order.deliveryMethod === "pickup" ? (order.status === "PROCESSING" ? "Mark ready for pickup" : "Record pickup") : (order.status === "PROCESSING" ? "Record SHIPPED" : "Record DELIVERED")}
                 </button>
               </article>
             ))}
-            {orders.length === 0 && <p className="rounded-xl bg-white p-4 text-sm text-ink-muted">No orders awaiting shipment or delivery.</p>}
+            {orders.length === 0 && <p className="rounded-xl bg-white p-4 text-sm text-ink-muted">No orders awaiting delivery or pickup.</p>}
           </section>
 
           <section className="space-y-3">

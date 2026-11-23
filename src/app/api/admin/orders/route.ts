@@ -11,8 +11,8 @@ export async function GET() {
     if (!auth.success) return auth.response;
     await connectDB();
 
-    const orders = await Order.find({ status: { $in: ["PROCESSING", "SHIPPED"] } })
-      .select("_id buyerId status createdAt deliveryMethod courierName items.name")
+    const orders = await Order.find({ status: { $in: ["PROCESSING", "SHIPPED", "READY_FOR_PICKUP"] } })
+      .select("_id buyerId status createdAt deliveryMethod courierName pickupHub items.name")
       .populate("buyerId", "name")
       .sort({ createdAt: 1 })
       .limit(200)
@@ -45,7 +45,8 @@ export async function POST(request: NextRequest) {
     if (
       typeof input.orderId !== "string" ||
       !mongoose.isValidObjectId(input.orderId) ||
-      (input.action !== "SHIPPED" && input.action !== "DELIVERED") ||
+      (input.action !== "SHIPPED" && input.action !== "DELIVERED" &&
+        input.action !== "READY_FOR_PICKUP" && input.action !== "PICKED_UP") ||
       (input.reference !== undefined &&
         (typeof input.reference !== "string" || input.reference.length > 200)) ||
       (input.note !== undefined &&
@@ -66,9 +67,15 @@ export async function POST(request: NextRequest) {
         const order = await Order.findById(orderId).session(session);
         if (!order) throw new Error("Order not found.");
 
-        if (action === "SHIPPED") {
+        if (action === "SHIPPED" || action === "READY_FOR_PICKUP") {
           if (order.status !== "PROCESSING") {
-            throw new Error("Only QC-cleared orders can be marked SHIPPED.");
+            throw new Error("Only QC-cleared orders can be prepared for delivery or pickup.");
+          }
+          if ((action === "SHIPPED") !== (order.deliveryMethod === "courier")) {
+            throw new Error("Delivery action does not match the order method.");
+          }
+          if (action === "READY_FOR_PICKUP" && !order.pickupHub?.id) {
+            throw new Error("Pickup hub is missing.");
           }
           if (
             order.items.some(
@@ -77,12 +84,15 @@ export async function POST(request: NextRequest) {
                 item.qcStatus !== "BUYER_ACCEPTED",
             )
           ) {
-            throw new Error("All order items must pass QC or be accepted before shipping.");
+            throw new Error("All order items must pass QC or be accepted before delivery or pickup.");
           }
-          order.status = "SHIPPED";
+          order.status = action;
         } else {
-          if (order.status !== "SHIPPED") {
-            throw new Error("An order must be marked SHIPPED before DELIVERED.");
+          if (action === "DELIVERED" && (order.deliveryMethod !== "courier" || order.status !== "SHIPPED")) {
+            throw new Error("A courier order must be shipped before delivery.");
+          }
+          if (action === "PICKED_UP" && (order.deliveryMethod !== "pickup" || order.status !== "READY_FOR_PICKUP")) {
+            throw new Error("A pickup order must be ready before collection.");
           }
           order.status = "DELIVERED";
         }
@@ -104,11 +114,15 @@ export async function POST(request: NextRequest) {
           recipientIds: [order.buyerId.toString()],
           senderId: auth.user.id,
           type: "ORDER_UPDATE",
-          title: action === "SHIPPED" ? "Order shipped" : "Order delivered",
+          title: action === "SHIPPED" ? "Order shipped" : action === "READY_FOR_PICKUP" ? "Order ready for pickup" : action === "PICKED_UP" ? "Order picked up" : "Order delivered",
           message:
             action === "SHIPPED"
               ? "An admin recorded your order as shipped."
-              : "Your order was marked delivered. Confirm receipt to complete the order.",
+              : action === "READY_FOR_PICKUP"
+                ? `Your order is ready for pickup at ${order.pickupHub?.name}.`
+                : action === "PICKED_UP"
+                  ? "Your pickup was recorded. Confirm receipt to complete the order."
+                  : "Your order was marked delivered. Confirm receipt to complete the order.",
           link: `/orders/${order._id.toString()}`,
           session,
         });
@@ -123,9 +137,12 @@ export async function POST(request: NextRequest) {
     const message = error instanceof Error ? error.message : "Could not update delivery status.";
     const notFound = message === "Order not found.";
     const conflict = [
-      "Only QC-cleared orders can be marked SHIPPED.",
-      "All order items must pass QC or be accepted before shipping.",
-      "An order must be marked SHIPPED before DELIVERED.",
+      "Only QC-cleared orders can be prepared for delivery or pickup.",
+      "Delivery action does not match the order method.",
+      "Pickup hub is missing.",
+      "All order items must pass QC or be accepted before delivery or pickup.",
+      "A courier order must be shipped before delivery.",
+      "A pickup order must be ready before collection.",
     ].includes(message);
     const status = notFound ? 404 : conflict ? 409 : 500;
     if (status === 500) console.error("Update admin delivery status error:", error);

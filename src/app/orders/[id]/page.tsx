@@ -5,7 +5,6 @@ import Link from "next/link";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { ArrowLeft, BadgeCheck, Box, CalendarDays, CircleHelp, Copy, ExternalLink, MapPin, Truck } from "lucide-react";
-import { QRCodeSVG } from "qrcode.react";
 import Countdown from "@/components/ui/Countdown";
 import OrderStatusBadge from "@/components/orders/OrderStatusBadge";
 import OrderTimeline from "@/components/orders/OrderTimeline";
@@ -74,8 +73,8 @@ function OrderDetailsContent() {
   }
   async function decideQc(productId: string, decision: "ACCEPT" | "REJECT") {
     if (!order || qcSaving) return;
-    if (!window.confirm(decision === "REJECT" ? "Reject this product? You will receive 100% of the product value in Green Points." : "Accept this product and continue shipping without cashback?")) return;
-    try { setQcSaving(true); setError(""); await apiRequest<{ qcStatus: string; refundAmount: number }>(`/api/orders/${encodeURIComponent(order.id)}/qc-decision`, { method: "POST", body: JSON.stringify({ productId, decision }) }); setNotice(decision === "REJECT" ? "Refund initiated. The full product value will be returned as Green Points." : "Your choice was recorded. The product will continue to shipping."); await apiRequest<OrderShape>(`/api/orders/${encodeURIComponent(id)}`).then(setOrder); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not save your decision."); } finally { setQcSaving(false); }
+    if (!window.confirm(decision === "REJECT" ? "Reject this product? You will receive 100% of the product value in Green Points." : `Accept this product and continue ${order.delivery?.method === "pickup" ? "pickup preparation" : "shipping"} without cashback?`)) return;
+    try { setQcSaving(true); setError(""); await apiRequest<{ qcStatus: string; refundAmount: number }>(`/api/orders/${encodeURIComponent(order.id)}/qc-decision`, { method: "POST", body: JSON.stringify({ productId, decision }) }); setNotice(decision === "REJECT" ? "Refund initiated. The full product value will be returned as Green Points." : `Your choice was recorded. The product will continue to ${order.delivery?.method === "pickup" ? "pickup preparation" : "shipping"}.`); await apiRequest<OrderShape>(`/api/orders/${encodeURIComponent(id)}`).then(setOrder); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not save your decision."); } finally { setQcSaving(false); }
   }
 
   async function confirmReceipt() {
@@ -190,7 +189,7 @@ function OrderDetailsContent() {
 
       <section className="flex items-center gap-3 rounded-3xl bg-mint-50 p-4">
         <span className="flex size-11 shrink-0 items-center justify-center rounded-full bg-white text-primary"><CalendarDays size={20} /></span>
-        <div className="min-w-0 flex-1"><p className="text-xs text-ink-muted">{delivery?.method === "pickup" ? "Ready for pickup by" : "Estimated arrival"}</p><p className="mt-1 text-base font-bold text-ink">{delivery?.method === "pickup" ? formatOrderDate(viewOrder.pickupDeadline ?? addDays(new Date(viewOrder.createdAt), 7).toISOString()) : routeDates ?? "Arrival estimate unavailable"}</p></div>
+        <div className="min-w-0 flex-1"><p className="text-xs text-ink-muted">{delivery?.method === "pickup" ? "Pickup status" : "Estimated arrival"}</p><p className="mt-1 text-base font-bold text-ink">{delivery?.method === "pickup" ? (viewOrder.status === "READY_FOR_PICKUP" ? "Ready at your selected hub" : ["DELIVERED", "COMPLETED"].includes(viewOrder.status) ? "Pickup recorded" : "Waiting for hub confirmation") : routeDates ?? "Arrival estimate unavailable"}</p></div>
         <span aria-hidden="true" className="flex size-14 items-center justify-center rounded-full bg-primary/10 text-primary">{delivery?.method === "pickup" ? <Box size={28} /> : <Truck size={30} />}</span>
       </section>
 
@@ -266,14 +265,12 @@ function CourierDetails({ order, latest, onCopy, onHelp }: { order: OrderShape; 
 
 function PickupDetails({ order, onHelp }: { order: OrderShape; onHelp: () => void }) {
   const hub = order.delivery?.hub;
-  const readyForPickup = order.status === "Ready for pickup";
+  const readyForPickup = order.status === "READY_FOR_PICKUP" || order.status === "Ready for pickup";
   const mapQuery = encodeURIComponent(`${hub?.name ?? "Swap Hub"} ${hub?.address ?? ""}`);
   return (
     <section className="rounded-3xl bg-white p-4 shadow-card">
       <div className="flex items-start gap-3"><MapPin className="mt-0.5 text-primary" size={20} /><div><h2 className="text-base font-semibold text-ink">Pickup at Swap Hub</h2><p className="mt-1 text-sm font-semibold text-primary">{hub?.name ?? "Swap Hub"}</p><p className="mt-1 text-xs text-ink-muted">{hub?.address}</p><p className="mt-1 text-xs text-ink-muted">{hub?.openingHours}</p></div></div>
-      {readyForPickup ? (
-        order.delivery?.pickupCode ? <div className="mt-3 flex flex-col items-center rounded-2xl bg-mint-50 p-4"><QRCodeSVG value={order.delivery.pickupCode} size={150} title="Pickup QR code for display only" /><p className="mt-2 text-xs font-bold tracking-wider text-ink">{order.delivery.pickupCode}</p><p className="mt-1 text-[10px] text-ink-muted">QR display only; no scanning validation is connected.</p></div> : <p role="alert" className="mt-3 rounded-xl bg-danger/10 p-3 text-xs text-danger">Pickup code unavailable; contact support before visiting the Hub.</p>
-      ) : <p className="mt-3 rounded-2xl bg-mint-50 p-4 text-xs leading-relaxed text-ink-muted">Your QR code will appear when your order is ready.</p>}
+      <p className="mt-3 rounded-2xl bg-mint-50 p-4 text-xs leading-relaxed text-ink-muted">{readyForPickup ? "Your order is ready. Show your order ID to staff when collecting it." : ["DELIVERED", "COMPLETED"].includes(order.status) ? "Pickup has been recorded." : "Wait until the hub confirms your order is ready before visiting."}</p>
       <div className="mt-3 grid grid-cols-2 gap-2">
         <a href={`https://www.google.com/maps/search/?api=1&query=${mapQuery}`} target="_blank" rel="noreferrer" className="flex min-h-11 items-center justify-center gap-1.5 rounded-full bg-primary px-2 text-[11px] font-semibold text-white">Get directions <ExternalLink size={13} /></a>
         <button type="button" onClick={onHelp} className="flex min-h-11 items-center justify-center gap-1.5 rounded-full border border-primary/40 px-2 text-[11px] font-semibold text-primary"><CircleHelp size={14} /> Order help</button>

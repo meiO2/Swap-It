@@ -10,6 +10,7 @@ const styles: Record<Status, string> = {
   QC_IN_PROGRESS: "bg-warning/15 text-warning",
   AWAITING_BUYER_CONFIRMATION: "bg-warning/15 text-warning",
   PROCESSING: "bg-info/15 text-info",
+  READY_FOR_PICKUP: "bg-primary/10 text-primary",
   SHIPPED: "bg-primary-soft/20 text-primary-dark",
   DELIVERED: "bg-success/15 text-success",
   COMPLETED: "bg-success/15 text-success",

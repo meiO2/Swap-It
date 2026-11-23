@@ -8,7 +8,7 @@ export default function OrderTimeline({ order }: { order: OrderShape }) {
   return (
     <ol aria-label="Order status timeline" className="rounded-2xl bg-mint-50 p-4">
       {timeline.map((step, index) => {
-        const done = index < currentIndex || (index === currentIndex && (order.status === "Delivered" || order.status === "Picked up" || order.status === "Completed"));
+        const done = index < currentIndex || (index === currentIndex && ["Delivered", "Picked up", "Completed", "DELIVERED", "COMPLETED"].includes(order.status));
         const current = index === currentIndex && !done;
         const Icon = current ? ActiveIcon : index === 0 ? PackageCheck : Circle;
         const time = step.at ? new Intl.DateTimeFormat("en-ID", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(step.at)) : "-";

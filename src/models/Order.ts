@@ -9,6 +9,7 @@ export type OrderStatus =
   | "QC_IN_PROGRESS"
   | "AWAITING_BUYER_CONFIRMATION"
   | "PROCESSING"
+  | "READY_FOR_PICKUP"
   | "SHIPPED"
   | "DELIVERED"
   | "COMPLETED"
@@ -159,7 +160,7 @@ export interface IOrder {
   pickupHub?: IPickupHub;
   status: OrderStatus;
   shipmentEvents?: Array<{
-    status: "SHIPPED" | "DELIVERED";
+    status: "SHIPPED" | "DELIVERED" | "READY_FOR_PICKUP" | "PICKED_UP";
     recordedBy: mongoose.Types.ObjectId;
     recordedAt: Date;
     reference?: string;
@@ -397,6 +398,7 @@ const OrderSchema = new Schema<IOrder>(
         "QC_IN_PROGRESS",
         "AWAITING_BUYER_CONFIRMATION",
         "PROCESSING",
+        "READY_FOR_PICKUP",
         "SHIPPED",
         "DELIVERED",
         "COMPLETED",
@@ -410,7 +412,7 @@ const OrderSchema = new Schema<IOrder>(
     },
     shipmentEvents: {
       type: [{
-        status: { type: String, enum: ["SHIPPED", "DELIVERED"], required: true },
+        status: { type: String, enum: ["SHIPPED", "DELIVERED", "READY_FOR_PICKUP", "PICKED_UP"], required: true },
         recordedBy: { type: Schema.Types.ObjectId, ref: "User", required: true },
         recordedAt: { type: Date, required: true },
         reference: { type: String, trim: true, maxlength: 200 },

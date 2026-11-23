@@ -4,6 +4,7 @@ const colors: Record<string, string> = {
   PENDING_PAYMENT: "bg-warning/15 text-warning",
   PAID: "bg-primary/10 text-primary",
   PROCESSING: "bg-warning/15 text-warning",
+  READY_FOR_PICKUP: "bg-primary/10 text-primary",
   SHIPPED: "bg-info/15 text-info",
   DELIVERED: "bg-success/15 text-success",
   COMPLETED: "bg-success/15 text-success",

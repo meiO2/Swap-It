@@ -84,16 +84,24 @@ export async function GET(
       : null;
     const item = order.items[0];
     const timelineIndex =
-      ["DELIVERED", "COMPLETED"].includes(order.status) ? 5 :
+      ["DELIVERED", "COMPLETED"].includes(order.status) ? (order.deliveryMethod === "pickup" ? 3 : 5) :
+      order.status === "READY_FOR_PICKUP" ? 2 :
       order.status === "SHIPPED" ? 3 :
-      order.status === "PROCESSING" ? 2 :
+      order.status === "PROCESSING" ? (order.deliveryMethod === "pickup" ? 1 : 2) :
       ["RECEIVED", "QC_IN_PROGRESS", "AWAITING_BUYER_CONFIRMATION"].includes(order.status) ||
         item?.qcStatus === "PENDING" ? 1 : 0;
     const timeline = buildTimeline(
-      "courier",
+      order.deliveryMethod,
       order.createdAt?.toISOString() ?? new Date().toISOString(),
       timelineIndex,
     );
+    if (order.deliveryMethod === "pickup") {
+      for (let index = 1; index < timeline.length; index++) timeline[index].at = null;
+      const readyEvent = order.shipmentEvents?.find((event) => event.status === "READY_FOR_PICKUP");
+      const pickupEvent = order.shipmentEvents?.find((event) => event.status === "PICKED_UP");
+      if (readyEvent) timeline[2].at = readyEvent.recordedAt.toISOString();
+      if (pickupEvent) timeline[3].at = pickupEvent.recordedAt.toISOString();
+    }
     if (item?.handover?.receivedAt && timeline[1]) {
       timeline[1] = {
         ...timeline[1],
@@ -116,10 +124,11 @@ export async function GET(
         isBuyer,
         sellerSettlement,
         timeline,
-        progress: timelineIndex / 5,
+        progress: timelineIndex / (order.deliveryMethod === "pickup" ? 3 : 5),
         deliveryMethod: order.deliveryMethod,
         delivery: {
           method: order.deliveryMethod,
+          hub: order.pickupHub,
           address: order.shippingAddress
             ? {
                 id: "order-address",

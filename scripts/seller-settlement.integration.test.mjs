@@ -28,7 +28,8 @@ registerHooks({
     const isSettlementRoute = parentUrl.endsWith("/src/app/api/admin/settlements/route.ts");
     const isResolutionQueueRoute = parentUrl.endsWith("/src/app/api/admin/seller-financial-resolutions/route.ts");
     const isBuyerQcRoute = parentUrl.endsWith("/src/app/api/orders/[id]/qc-decision/route.ts");
-    if (isSettlementRoute || isResolutionQueueRoute || isBuyerQcRoute) {
+    const isPickupRoute = parentUrl.endsWith("/src/app/api/orders/route.ts") || parentUrl.endsWith("/src/app/api/admin/orders/route.ts") || parentUrl.endsWith("/src/app/api/orders/[id]/confirm-received/route.ts");
+    if (isSettlementRoute || isResolutionQueueRoute || isBuyerQcRoute || isPickupRoute) {
       if (specifier === "@/lib/authorization") {
         return { url: "data:text/javascript,export const requireRole = async () => globalThis.__settlementTestAuth; export const requireAuth = requireRole", shortCircuit: true };
       }
@@ -36,7 +37,7 @@ registerHooks({
         return nextResolve("next/server.js", context);
       }
     }
-    if (specifier === "@/lib/mongodb" && (isSettlementRoute || isResolutionQueueRoute || isBuyerQcRoute || parentUrl.endsWith("/src/lib/notifications.ts"))) {
+    if (specifier === "@/lib/mongodb" && (isSettlementRoute || isResolutionQueueRoute || isBuyerQcRoute || isPickupRoute || parentUrl.endsWith("/src/lib/notifications.ts"))) {
       return { url: "data:text/javascript,export const connectDB = async () => globalThis.__settlementTestConnection", shortCircuit: true };
     }
     if (specifier.startsWith("@/")) {
@@ -59,6 +60,11 @@ const { processSellerFinancialResolution, recordSellerResolutionFailure } = awai
 const { POST: postSettlement, GET: getSettlements } = await import("../src/app/api/admin/settlements/route.ts");
 const { GET: getResolutionQueue } = await import("../src/app/api/admin/seller-financial-resolutions/route.ts");
 const { POST: postBuyerQcDecision } = await import("../src/app/api/orders/[id]/qc-decision/route.ts");
+const { POST: createBuyerOrder } = await import("../src/app/api/orders/route.ts");
+const { POST: updateDelivery } = await import("../src/app/api/admin/orders/route.ts");
+const { POST: confirmReceipt } = await import("../src/app/api/orders/[id]/confirm-received/route.ts");
+const { default: Cart } = await import("../src/models/Cart.ts");
+const { default: Product } = await import("../src/models/Product.ts");
 
 let replSet;
 let connection;
@@ -139,6 +145,73 @@ after(async () => {
   await mongoose.disconnect();
   if (connection) await connection.close();
   if (replSet) await replSet.stop();
+});
+
+test("buyer pickup is free and requires QC and hub confirmation before collection", async () => {
+  const buyerId = new mongoose.Types.ObjectId();
+  const sellerId = new mongoose.Types.ObjectId();
+  const adminId = new mongoose.Types.ObjectId();
+  const product = await Product.create({
+    sellerId, name: "Pickup item", description: "Test", category: "Tops",
+    price: 100_000, size: "M", condition: "GOOD", images: ["https://example.com/item.jpg"],
+    status: "AVAILABLE",
+  });
+  await Cart.create({ userId: buyerId, items: [{ productId: product._id }] });
+  const request = (body) => new Request("http://localhost/api/orders", {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+  });
+  globalThis.__settlementTestAuth = { success: true, user: { id: buyerId.toString(), role: "USER" } };
+  const invalid = await createBuyerOrder(request({ deliveryMethod: "pickup", pickupHubId: "unknown" }));
+  assert.equal(invalid.status, 400);
+  const created = await createBuyerOrder(request({ deliveryMethod: "pickup", pickupHubId: "hub-bsd", gpUsed: 0 }));
+  assert.equal(created.status, 201);
+  const { data } = await created.json();
+  assert.equal(data.shippingFee, 0);
+  assert.equal(data.totalAmount, 103_000);
+  assert.equal(data.pickupHub.id, "hub-bsd");
+  assert.equal(data.shippingAddress, undefined);
+  assert.equal((await Cart.findOne({ userId: buyerId }).lean()).items.length, 0);
+
+  globalThis.__settlementTestAuth = { success: true, user: { id: adminId.toString(), role: "ADMIN" } };
+  const update = (action) => updateDelivery(request({ orderId: data._id, action }));
+  assert.equal((await update("READY_FOR_PICKUP")).status, 409);
+  await Order.updateOne({ _id: data._id }, { $set: { status: "PROCESSING", "items.0.qcStatus": "PENDING" } });
+  assert.equal((await update("READY_FOR_PICKUP")).status, 409);
+  await Order.updateOne({ _id: data._id }, { $set: { "items.0.qcStatus": "PASSED" } });
+  assert.equal((await update("SHIPPED")).status, 409);
+  assert.equal((await update("PICKED_UP")).status, 409);
+  assert.equal((await update("READY_FOR_PICKUP")).status, 200);
+  assert.equal((await Order.findById(data._id).lean()).status, "READY_FOR_PICKUP");
+  globalThis.__settlementTestAuth = { success: true, user: { id: buyerId.toString(), role: "USER" } };
+  const context = { params: Promise.resolve({ id: data._id }) };
+  assert.equal((await confirmReceipt(request({}), context)).status, 409);
+  globalThis.__settlementTestAuth = { success: true, user: { id: adminId.toString(), role: "ADMIN" } };
+  assert.equal((await update("PICKED_UP")).status, 200);
+  const collected = await Order.findById(data._id).lean();
+  assert.equal(collected.status, "DELIVERED");
+  assert.deepEqual(collected.shipmentEvents.map((event) => event.status), ["READY_FOR_PICKUP", "PICKED_UP"]);
+  globalThis.__settlementTestAuth = { success: true, user: { id: buyerId.toString(), role: "USER" } };
+  assert.equal((await confirmReceipt(request({}), context)).status, 200);
+  assert.equal((await Order.findById(data._id).lean()).status, "COMPLETED");
+  assert.equal(await SellerPayable.countDocuments({ orderId: data._id, sellerId }), 1);
+  globalThis.__settlementTestAuth = { success: true, user: { id: adminId.toString(), role: "ADMIN" } };
+});
+
+test("courier delivery retains its shipment sequence", async () => {
+  const order = await Order.create({
+    buyerId: new mongoose.Types.ObjectId(),
+    items: [{ productId: new mongoose.Types.ObjectId(), sellerId: new mongoose.Types.ObjectId(), name: "Item", price: 100_000, qcStatus: "PASSED" }],
+    subtotal: 100_000, totalAmount: 103_000, deliveryMethod: "courier",
+    status: "PROCESSING", expiresAt: new Date(Date.now() + 60_000),
+  });
+  const update = (action) => updateDelivery(new Request("http://localhost/api/admin/orders", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ orderId: order._id.toString(), action }),
+  }));
+  assert.equal((await update("READY_FOR_PICKUP")).status, 409);
+  assert.equal((await update("SHIPPED")).status, 200);
+  assert.equal((await update("DELIVERED")).status, 200);
+  assert.equal((await Order.findById(order._id).lean()).status, "DELIVERED");
 });
 
 test("order fence requires an active transaction", async () => {

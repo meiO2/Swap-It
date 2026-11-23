@@ -7,6 +7,7 @@ export type OrderStatus =
   | "QC_IN_PROGRESS"
   | "AWAITING_BUYER_CONFIRMATION"
   | "PROCESSING"
+  | "READY_FOR_PICKUP"
   | "SHIPPED"
   | "DELIVERED"
   | "COMPLETED"
@@ -30,7 +31,7 @@ export type OrderDelivery = {
   method: DeliveryMethod;
   courier?: { id: string; name: string; fee: number; minDays: number; maxDays: number };
   address?: import("@/data/addresses").SavedAddress;
-  hub?: { id: string; name: string; address: string; distance: string; openingHours: string; position: [number, number] };
+  hub?: { id?: string; name?: string; address?: string; distance?: string; openingHours?: string; position?: [number, number] };
   trackingNumber?: string;
   pickupCode?: string;
 };
@@ -54,6 +55,7 @@ export type OrderShape = {
   subtotal?: number;
   totalAmount?: number;
   deliveryMethod?: DeliveryMethod;
+  pickupHub?: OrderDelivery["hub"];
   productValue: number;
   shippingFee: number;
   serviceFee: number;
@@ -99,7 +101,7 @@ export type OrderShape = {
   sellerOutcome?: "Pending" | "Retrieved" | "Revamp";
   rewardEligible?: boolean;
   shipmentEvents?: Array<{
-    status: "SHIPPED" | "DELIVERED";
+    status: "SHIPPED" | "DELIVERED" | "READY_FOR_PICKUP" | "PICKED_UP";
     recordedAt: string;
     reference?: string;
   }>;
@@ -192,7 +194,8 @@ export function getCurrentTimelineIndex(order: OrderShape) {
     order.status === "AWAITING_BUYER_CONFIRMATION" ||
     order.qcStatus === "pending"
   ) return 1;
-  if (order.status === "PROCESSING" || order.status === "Processing") return 2;
+  if (order.status === "PROCESSING" || order.status === "Processing") return order.delivery?.method === "pickup" ? 1 : 2;
+  if (order.status === "READY_FOR_PICKUP") return 2;
   if (order.status === "SHIPPED" || order.status === "Shipped") return 3;
   if (order.status === "On the way") return 3;
   if (order.status === "Out for delivery") return 4;
@@ -217,6 +220,9 @@ export function createTrackingEvent(order: OrderShape, title: string, at = new D
 }
 
 export function getOrderStatusLabel(order: OrderShape) {
+  if (order.status === "READY_FOR_PICKUP") return "Ready for pickup";
+  if (order.status === "DELIVERED" && (order.delivery?.method ?? order.deliveryMethod) === "pickup") return "Picked up";
+  if (order.status === "COMPLETED" && (order.delivery?.method ?? order.deliveryMethod) === "pickup") return "Completed";
   if (order.status === "QC review" && order.qcStatus === "rejected") return "Action needed";
   if (order.status === "Shipped") return "Package picked up";
   if (order.status === "Delivered" || order.status === "Picked up") return order.status;

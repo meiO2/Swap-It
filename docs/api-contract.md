@@ -32,9 +32,12 @@ QC endpoints allow ADMIN and INSPECTOR.
 - `PATCH /api/listings/:id` — updates the pickup date for a listing owned by
   the current user.
 - `GET /api/orders` — current user's orders.
-- `POST /api/orders` — creates an order using courier delivery only. The
-  request includes `deliveryMethod: "courier"`, a shipping address, courier
-  code, and optional Green Points. The buyer service fee is 3% of product
+- `POST /api/orders` — creates an order with either `deliveryMethod: "courier"`,
+  a shipping address and courier code, or `deliveryMethod: "pickup"` and a
+  `pickupHubId` from the Swap Hub catalog. Pickup has no shipping fee. After
+  QC, an admin confirms all items are physically available at the selected hub,
+  then records their collection; the buyer confirms receipt to complete the
+  order. Green Points are optional. The buyer service fee is 3% of product
   subtotal, rounded half up to whole rupiah. Green Point redemption is capped
   at 30% of product subtotal; shipping and service fees are paid in cash.
   Each seller's products must total at least Rp5.500. The order stores an
@@ -119,10 +122,13 @@ QC endpoints allow ADMIN and INSPECTOR.
   seller-retrieval/return workflow, and the full product subtotal is refunded
   in GP (shipping and service fees are excluded). Saving is disabled until
   approved QC criteria are configured in `src/data/qcCriteria.ts`.
-- `GET /api/admin/orders` — ADMIN-only shipment queue.
+- `GET /api/admin/orders` — ADMIN-only shipment and pickup queue.
 - `POST /api/admin/orders` — ADMIN-only `{ orderId, action: "SHIPPED" |
-  "DELIVERED", reference?, note? }`. An order must be QC-cleared before
-  `SHIPPED`; `DELIVERED` is accepted only after `SHIPPED`.
+  "DELIVERED" | "READY_FOR_PICKUP" | "PICKED_UP", reference?, note? }`.
+  Courier orders require QC clearance before `SHIPPED`, then `DELIVERED`.
+  Pickup orders require QC clearance and physical availability at the
+  selected hub before `READY_FOR_PICKUP`; after collection, `PICKED_UP`
+  records the order as `DELIVERED` for buyer receipt confirmation.
 - `GET /api/admin/settlements` — ADMIN-only, paginated seller payables,
   recoveries, and their auditable settlement ledger. Accepts independent
   `payablesPage` and `recoveriesPage` parameters (both default to `1`), a

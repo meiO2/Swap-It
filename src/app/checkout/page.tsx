@@ -15,6 +15,7 @@ import {
   X,
 } from "lucide-react";
 import { couriers, type Courier } from "@/data/couriers";
+import { swapHubs } from "@/data/mock";
 import type { IUserAddress } from "@/models/User";
 import { estimateArrival, formatOrderDate } from "@/lib/orders";
 import { formatRupiah } from "@/lib/format";
@@ -74,6 +75,8 @@ export default function CheckoutPage() {
   const [cartError, setCartError] = useState("");
 
   const [courierId, setCourierId] = useState(couriers[0].id);
+  const [deliveryMethod, setDeliveryMethod] = useState<"courier" | "pickup">("courier");
+  const [pickupHubId, setPickupHubId] = useState("");
   const [addresses, setAddresses] = useState<IUserAddress[]>([]);
   const [address, setAddress] = useState<IUserAddress>({
     id: "",
@@ -135,19 +138,22 @@ export default function CheckoutPage() {
     calculateMaximumGpRedemption(subtotal),
   );
   const appliedGpUsed = Math.min(gpUsed, maximumGp);
-  const paymentAmount = subtotal + (selectedShippingRate?.price ?? 0) + serviceFee - appliedGpUsed;
+  const shippingFee = deliveryMethod === "courier" ? selectedShippingRate?.price ?? 0 : 0;
+  const selectedHub = swapHubs.find((hub) => hub.id === pickupHubId);
+  const paymentAmount = subtotal + shippingFee + serviceFee - appliedGpUsed;
   const paymentAmountInvalid = paymentAmount < QRIS_MIN_AMOUNT || paymentAmount > QRIS_MAX_AMOUNT;
   const eta = etaStart
     ? estimateArrival(etaStart, courier.minDays, courier.maxDays)
     : null;
 
-  const methodValid = Boolean(
+  const methodValid = deliveryMethod === "pickup" ? Boolean(selectedHub) : Boolean(
     address.name &&
       address.phone &&
       address.address &&
       address.city &&
+      address.postalCode &&
       courier &&
-      shippingRates.length > 0,
+      selectedShippingRate && !shippingLoading && !shippingError,
   );
 
   useEffect(() => {
@@ -159,7 +165,7 @@ export default function CheckoutPage() {
   }, []);
 
   useEffect(() => {
-    if (!address.postalCode || !items.length) {
+    if (deliveryMethod !== "courier" || !address.postalCode || !items.length) {
       return;
     }
     let active = true;
@@ -186,7 +192,7 @@ export default function CheckoutPage() {
       window.clearTimeout(loadingTimer);
       window.clearTimeout(errorTimer);
     };
-  }, [address.postalCode, items.length]);
+  }, [address.postalCode, items.length, deliveryMethod]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -327,16 +333,20 @@ export default function CheckoutPage() {
       const order = await apiRequest<OrderResponse>("/api/orders", {
         method: "POST",
         body: JSON.stringify({
-          deliveryMethod: "courier",
+          deliveryMethod,
           gpUsed: appliedGpUsed,
-          courierCode: courierId,
-          shippingAddress: {
-            name: address.name,
-            phone: address.phone,
-            address: address.address,
-            city: address.city,
-            postalCode: address.postalCode,
-          },
+          ...(deliveryMethod === "pickup"
+            ? { pickupHubId }
+            : {
+                courierCode: courierId,
+                shippingAddress: {
+                  name: address.name,
+                  phone: address.phone,
+                  address: address.address,
+                  city: address.city,
+                  postalCode: address.postalCode,
+                },
+              }),
         }),
       });
 
@@ -499,12 +509,29 @@ export default function CheckoutPage() {
               Delivery method
             </h2>
 
-            <div className="flex items-center gap-3 rounded-2xl bg-mint-50 p-3">
-              <Truck size={18} className="text-primary" />
-              <p className="text-xs font-medium text-ink">
-                Courier delivery only
-              </p>
-            </div>
+            <fieldset>
+              <legend className="sr-only">Choose delivery method</legend>
+              <div className="grid grid-cols-2 gap-2">
+                <label className={`flex items-center gap-2 rounded-2xl border p-3 text-xs font-semibold ${deliveryMethod === "courier" ? "border-primary bg-mint-50 text-primary" : "border-border text-ink"}`}>
+                  <input type="radio" name="deliveryMethod" value="courier" checked={deliveryMethod === "courier"} onChange={() => setDeliveryMethod("courier")} />
+                  <Truck size={18} /> Courier
+                </label>
+                <label className={`flex items-center gap-2 rounded-2xl border p-3 text-xs font-semibold ${deliveryMethod === "pickup" ? "border-primary bg-mint-50 text-primary" : "border-border text-ink"}`}>
+                  <input type="radio" name="deliveryMethod" value="pickup" checked={deliveryMethod === "pickup"} onChange={() => setDeliveryMethod("pickup")} />
+                  <MapPin size={18} /> Pick up at Swap Hub
+                </label>
+              </div>
+            </fieldset>
+            {deliveryMethod === "pickup" ? (
+              <div className="mt-4">
+                <label htmlFor="pickup-hub" className="text-sm font-semibold text-ink">Choose a Swap Hub</label>
+                <select id="pickup-hub" value={pickupHubId} onChange={(event) => setPickupHubId(event.target.value)} className="mt-2 min-h-11 w-full rounded-xl border border-border bg-white px-3 text-sm text-ink">
+                  <option value="">Select a hub</option>
+                  {swapHubs.map((hub) => <option key={hub.id} value={hub.id}>{hub.name} — {hub.address}</option>)}
+                </select>
+                <p className="mt-2 text-xs text-ink-muted">Pickup is free. Wait for confirmation that all items are ready at your selected hub before visiting.</p>
+              </div>
+            ) : (
             <>
                 <div className="mt-3 flex items-start gap-3 rounded-2xl bg-mint-50 p-3">
                   <MapPin
@@ -593,6 +620,7 @@ export default function CheckoutPage() {
                   })}
                 </div>
             </>
+            )}
           </section>
 
           {/* Green Points */}
@@ -632,11 +660,11 @@ export default function CheckoutPage() {
               Price breakdown
             </h2>
 
-            <p className="mb-3 rounded-xl bg-warning/10 p-3 text-xs leading-relaxed text-ink">
+            {deliveryMethod === "courier" && <p className="mb-3 rounded-xl bg-warning/10 p-3 text-xs leading-relaxed text-ink">
               Shipping rates are calculated by Biteship using the selected
               destination and courier. The backend recalculates the rate
               before creating the order.
-            </p>
+            </p>}
 
             <BreakdownRow
               label="Product value"
@@ -645,7 +673,7 @@ export default function CheckoutPage() {
 
             <BreakdownRow
               label="Delivery"
-              value={`${selectedShippingRate?.courier_name ?? courier.name} to ${address.city || "your address"}`}
+              value={deliveryMethod === "pickup" ? `Pickup at ${selectedHub?.name ?? "selected Swap Hub"}` : `${selectedShippingRate?.courier_name ?? courier.name} to ${address.city || "your address"}`}
             />
 
             <BreakdownRow
@@ -655,7 +683,7 @@ export default function CheckoutPage() {
 
             <BreakdownRow
               label="Shipping fee"
-              value={formatRupiah(selectedShippingRate?.price ?? 0)}
+              value={formatRupiah(shippingFee)}
             />
 
             <BreakdownRow
@@ -675,7 +703,7 @@ export default function CheckoutPage() {
 
           {!methodValid && (
             <p className="mt-3 text-xs text-warning">
-              Choose a valid delivery address and courier to continue.
+              {deliveryMethod === "pickup" ? "Choose a Swap Hub to continue." : "Choose a valid delivery address and courier to continue."}
             </p>
           )}
 

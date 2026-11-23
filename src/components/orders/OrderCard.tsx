@@ -12,7 +12,7 @@ export default function OrderCard({ order }: { order: OrderShape }) {
   const firstItem = order.items[0];
   const product = catalogProducts.find((item) => item.id === firstItem?.productId);
   const deliveryLabel = order.deliveryMethod === "pickup" || order.delivery?.method === "pickup"
-    ? `Pickup at ${order.delivery?.hub?.name ?? "Swap Hub"}`
+    ? `Pickup at ${order.delivery?.hub?.name ?? order.pickupHub?.name ?? "Swap Hub"}`
     : "Courier";
   const orderTotal = order.totalAmount ?? order.moneyPaid ?? order.subtotal ?? 0;
   return (

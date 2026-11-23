@@ -29,6 +29,7 @@ import {
   SELLER_MINIMUM_MESSAGE,
 } from "@/lib/fees";
 import { QRIS_AMOUNT_MESSAGE, QRIS_MAX_AMOUNT, QRIS_MIN_AMOUNT } from "@/lib/payment-limits";
+import { swapHubs } from "@/data/mock";
 
 const PAYMENT_EXPIRY_MINUTES = 30;
 
@@ -90,12 +91,22 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json();
 
-    if (body?.deliveryMethod !== "courier") {
+    if (body?.deliveryMethod !== "courier" && body?.deliveryMethod !== "pickup") {
       return NextResponse.json(
         {
           success: false,
-          message: "Buyer orders must use courier delivery.",
+          message: "Choose courier delivery or Swap Hub pickup.",
         },
+        { status: 400 },
+      );
+    }
+
+    const pickupHub = body.deliveryMethod === "pickup"
+      ? swapHubs.find((hub) => hub.id === body.pickupHubId)
+      : undefined;
+    if (body.deliveryMethod === "pickup" && !pickupHub) {
+      return NextResponse.json(
+        { success: false, message: "Select a valid Swap Hub for pickup." },
         { status: 400 },
       );
     }
@@ -377,6 +388,14 @@ export async function POST(request: NextRequest) {
                   postalCode: body.shippingAddress.postalCode.trim(),
                 }
               : undefined,
+          pickupHub: pickupHub
+            ? {
+                id: pickupHub.id,
+                name: pickupHub.name,
+                address: pickupHub.address,
+                openingHours: pickupHub.openingHours,
+              }
+            : undefined,
           status: "PENDING_PAYMENT",
           expiresAt,
         });

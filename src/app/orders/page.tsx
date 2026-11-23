@@ -13,8 +13,8 @@ type Filter = (typeof filters)[number];
 function matchesFilter(order: OrderShape, filter: Filter) {
   if (filter === "All") return true;
   if (filter === "Processing") return order.status === "Processing" || order.status === "QC review";
-  if (filter === "Shipping / Ready") return ["Shipped", "On the way", "Out for delivery", "Ready for pickup"].includes(order.status);
-  if (filter === "Completed") return ["Delivered", "Picked up", "Completed"].includes(order.status);
+  if (filter === "Shipping / Ready") return ["Shipped", "On the way", "Out for delivery", "Ready for pickup", "READY_FOR_PICKUP"].includes(order.status);
+  if (filter === "Completed") return ["Delivered", "Picked up", "Completed", "DELIVERED", "COMPLETED"].includes(order.status);
   return order.status === "Cancelled" || order.status === "Not eligible";
 }
 
